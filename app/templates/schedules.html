@@ -83,7 +83,22 @@
     <div style="margin-top:10px"><button>Save &amp; refresh now</button></div>
     <div class="muted" style="margin-top:6px">Tip: add a daily "refresh DNS blocklist" job above to keep it current.</div>
   </form>
+
+  <div class="card">
+    <div class="muted">Last refresh</div>
+    <div style="margin-top:4px;font-size:.9rem">
+      {%- if blocklist.running %}⏳ refreshing in the background…
+      {%- elif blocklist.ok is none %} <span class="muted">not run yet</span>
+      {%- elif blocklist.ok %} ✅ {{ blocklist.detail }}{% if blocklist.at %} · {{ blocklist.at | ts }}{% endif %}
+      {%- else %} ⚠ failed: {{ blocklist.detail }}{% endif %}
+    </div>
+    <div class="muted" style="margin-top:6px">
+      The list is downloaded in the background, so this page can be reloaded
+      while it runs. Capped at 120,000 domains to protect the board's memory.
+    </div>
+  </div>
 <script>
+{% if blocklist.running %}setTimeout(() => location.reload(), 4000);{% endif %}
 document.querySelectorAll('form').forEach(f => {
   if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
     const i = document.createElement('input');

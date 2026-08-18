@@ -2,6 +2,7 @@
 import json
 import os
 import sqlite3
+import threading
 import time
 
 _SCHEMA = """
@@ -72,10 +73,14 @@ CREATE INDEX IF NOT EXISTS idx_sessions_exp   ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch);
 """
 
+# Settings kept out of a downloadable backup — see export_config().
+_SECRET_SETTINGS = ("SECRET_KEY", "remote_key")
+
 
 class Db:
     def __init__(self, path):
         self.path = path
+        self._local = threading.local()
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with self._conn() as c:
             c.executescript(_SCHEMA)
@@ -90,14 +95,35 @@ class Db:
             if "speed" not in wcols:
                 c.execute("ALTER TABLE wallets ADD COLUMN speed TEXT")
 
-    def _conn(self):
+    def _new_conn(self):
+        """A fresh, independent connection. Used for the thread cache below and
+        for long-lived streaming reads that must not share transaction state."""
         c = sqlite3.connect(self.path, timeout=5)
         c.row_factory = sqlite3.Row
         # WAL lets the reconcile/scheduler threads read while the web threads
         # write without blocking; busy_timeout avoids "database is locked".
+        # (WAL is a property of the file and persists; the other two are
+        # per-connection, so they're set on every new connection.)
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
         c.execute("PRAGMA busy_timeout=5000")
+        return c
+
+    def _conn(self):
+        """The calling thread's connection, opened once and reused.
+
+        Every portal client polls /api/status once a second, and each poll ran
+        two queries — so opening a connection and replaying three PRAGMAs per
+        query was real work on a 1.2 GHz A7. Connections are kept per-thread
+        because sqlite3 objects can't be shared across threads.
+
+        Note `with self._conn()` is sqlite3's *transaction* context manager
+        (it commits on exit); it does not close the connection, so reusing one
+        here is a drop-in change."""
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = self._new_conn()
+            self._local.conn = c
         return c
 
     # -- settings (override config.json defaults, editable from admin) --
@@ -201,10 +227,17 @@ class Db:
         return out
 
     def iter_sales(self):
-        """Stream every sale (for CSV export), oldest first."""
-        with self._conn() as c:
+        """Stream every sale (for CSV export), oldest first.
+
+        Takes its own connection: this generator stays open for the whole HTTP
+        response, so it must not hold the calling thread's shared connection in
+        an open transaction while other queries run on it."""
+        c = self._new_conn()
+        try:
             for r in c.execute("SELECT * FROM sales ORDER BY created_at"):
                 yield dict(r)
+        finally:
+            c.close()
 
     # -- vouchers --
 
@@ -290,13 +323,22 @@ class Db:
 
     # -- config backup / restore --
 
-    def export_config(self, include_sales=False):
-        """Portable snapshot for cloning machines (settings + vouchers + devices,
-        optionally the sales ledger). SECRET_KEY is intentionally excluded."""
+    def export_config(self, include_sales=False, include_secrets=False):
+        """Portable snapshot for cloning machines (settings + vouchers +
+        devices + pppoe accounts, optionally the sales ledger).
+
+        A downloaded backup is a file people mail to themselves, so fleet-wide
+        secrets are stripped: SECRET_KEY is never exported at all, and the
+        remote-dashboard HMAC key only when `include_secrets` (which the on-box
+        scheduled backup sets, so a local restore stays complete).
+
+        Caveat: PPPoE passwords are always present. CHAP needs the plaintext,
+        so there is no hashed form to export — treat the file as a credential."""
+        skip = ("SECRET_KEY",) if include_secrets else _SECRET_SETTINGS
         with self._conn() as c:
             settings = {r["key"]: json.loads(r["value"])
                         for r in c.execute("SELECT key,value FROM settings")
-                        if r["key"] != "SECRET_KEY"}
+                        if r["key"] not in skip}
             vouchers = [dict(r) for r in c.execute("SELECT * FROM vouchers")]
             devices = [dict(r) for r in c.execute("SELECT * FROM devices")]
             pppoe = [dict(r) for r in c.execute("SELECT * FROM pppoe_accounts")]

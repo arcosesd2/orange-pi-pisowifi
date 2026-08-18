@@ -159,6 +159,11 @@
     <button type="button" onclick="location='/admin/backup'">Download config backup</button>
     <button type="button" onclick="location='/admin/backup?sales=1'">Backup incl. sales</button>
   </p>
+  <p class="muted" style="margin-top:4px">
+    Downloaded backups leave out the session key and your remote-dashboard key.
+    They <b>do</b> contain PPPoE passwords — CHAP needs those in the clear, so
+    keep the file private.
+  </p>
   <form method="post" action="/admin/restore" enctype="multipart/form-data" style="margin-top:8px">
     <input type="file" name="file" accept="application/json"> <button>Restore backup</button>
   </form>

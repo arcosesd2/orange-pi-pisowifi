@@ -67,7 +67,9 @@ class Scheduler(threading.Thread):
             os.makedirs(d, exist_ok=True)
             fn = os.path.join(d, time.strftime("backup-%Y%m%d-%H%M.json"))
             with open(fn, "w") as f:
-                json.dump(self.db.export_config(include_sales=True), f)
+                # stays on the box, so keep it a complete restore (secrets included)
+                json.dump(self.db.export_config(include_sales=True,
+                                                include_secrets=True), f)
         elif t in self.actions:
             self.actions[t]()
         else:

@@ -107,8 +107,12 @@ DEFAULTS = {
     # portal branding
     "branding": {"color": "#fbbf24", "logo": "", "banner": "",
                  "show_redeem": True, "show_trial": True, "show_pause": True},
-    # real-time portal (opt-in; polling scales better for many clients)
+    # real-time portal (opt-in; polling scales better for many clients).
+    # Each open stream holds one of waitress's 8 worker threads for its whole
+    # life, so streams are capped and expire — see /api/stream.
     "sse_enabled": False,
+    "sse_max_clients": 4,
+    "sse_max_seconds": 300,
     # dns filtering
     "dns_filter": False,
     "dns_blocklist_url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
@@ -482,26 +486,51 @@ def api_status():
     return jsonify(**_status_payload(mac))
 
 
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+_sse_open = 0
+_sse_lock = threading.Lock()
+
+
 @app.route("/api/stream")
 def api_stream():
     """Server-Sent Events push of this client's status (opt-in; the portal
-    falls back to 1s polling when disabled)."""
+    falls back to polling when disabled).
+
+    An open stream occupies one waitress worker thread for its entire life and
+    there are only 8 of them, so without a limit a handful of phones would
+    starve the portal and admin for everyone. Two bounds keep that from
+    happening: at most `sse_max_clients` streams at once, and each expires
+    after `sse_max_seconds` (the browser's EventSource reconnects, which hands
+    the thread back). Clients refused here just keep using the portal's poll."""
+    global _sse_open
     if not setting("sse_enabled"):
         return jsonify(error="disabled"), 404
     mac = client_mac()
     if not mac:
         return jsonify(error="unidentified device"), 400
-    once = request.args.get("once")
+    if request.args.get("once"):
+        return app.response_class(
+            "data: " + json.dumps(_status_payload(mac)) + "\n\n",
+            mimetype="text/event-stream", headers=_SSE_HEADERS)
+
+    cap = max(1, int(setting("sse_max_clients") or 4))
+    with _sse_lock:
+        if _sse_open >= cap:
+            return jsonify(error="too many live streams — falling back to polling"), 503
+        _sse_open += 1
 
     def gen():
-        while True:
-            yield "data: " + json.dumps(_status_payload(mac)) + "\n\n"
-            if once:
-                break
-            time.sleep(1)
+        global _sse_open
+        try:
+            deadline = time.monotonic() + max(30, int(setting("sse_max_seconds") or 300))
+            while time.monotonic() < deadline:
+                yield "data: " + json.dumps(_status_payload(mac)) + "\n\n"
+                time.sleep(1)
+        finally:
+            with _sse_lock:
+                _sse_open -= 1
     return app.response_class(gen(), mimetype="text/event-stream",
-                              headers={"Cache-Control": "no-cache",
-                                       "X-Accel-Buffering": "no"})
+                              headers=_SSE_HEADERS)
 
 
 @app.route("/api/insert", methods=["POST"])
@@ -985,7 +1014,7 @@ def admin_schedules():
     return render_template(
         "schedules.html", name=setting("hotspot_name"),
         schedules=setting("schedules") or [],
-        dns_filter=setting("dns_filter"))
+        dns_filter=setting("dns_filter"), blocklist=blocklist_status)
 
 
 @app.route("/admin/schedules/add", methods=["POST"])
@@ -1024,8 +1053,12 @@ def admin_dns():
     db.set_setting("dns_filter", request.form.get("dns_filter") == "on")
     if request.form.get("dns_blocklist_url"):
         db.set_setting("dns_blocklist_url", request.form["dns_blocklist_url"].strip())
-    r = _refresh_blocklist()
-    _audit("dns filter", r.get("detail"))
+    # Fetching and installing the list takes tens of seconds. Doing it inline
+    # would hold one of the 8 worker threads for that whole time (and time the
+    # page out), so hand it to a background thread; the schedules page reports
+    # how it went.
+    threading.Thread(target=_refresh_blocklist, daemon=True).start()
+    _audit("dns filter", "refresh started")
     return redirect("/admin/schedules")
 
 
@@ -1229,41 +1262,87 @@ def _reload_dnsmasq():
     subprocess.run(["systemctl", "reload", "dnsmasq"], capture_output=True)
 
 
+# Cap the installed list: dnsmasq holds every name in RAM and this board has
+# 512 MB. The popular source lists sit well under this.
+_BLOCKLIST_MAX = 120_000
+_BLOCKLIST_SKIP = ("localhost", "localhost.localdomain", "broadcasthost", "0.0.0.0")
+
+_blocklist_lock = threading.Lock()
+blocklist_status = {"ok": None, "detail": "not run yet", "at": None, "running": False}
+
+
+def _blocklist_result(ok, detail):
+    blocklist_status.update(ok=ok, detail=detail, at=time.time())
+    return {"ok": ok, "detail": detail}
+
+
+def _blocklist_rules(lines, limit=_BLOCKLIST_MAX):
+    """hosts-format lines (str or bytes) -> dnsmasq `address=` rules.
+
+    A generator, so the caller can stream straight from the HTTP response to
+    disk without ever holding the whole list in memory. Stops at `limit`."""
+    n = 0
+    for raw in lines:
+        ln = (raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw).strip()
+        if not ln or ln.startswith("#"):
+            continue
+        parts = ln.split()
+        dom = parts[1] if len(parts) >= 2 else parts[0]
+        if "." not in dom or dom in _BLOCKLIST_SKIP:
+            continue
+        yield "address=/%s/0.0.0.0\n" % dom
+        n += 1
+        if n >= limit:
+            return
+
+
 def _refresh_blocklist():
-    """Fetch the DNS blocklist -> dnsmasq address= rules -> reload. Returns a
-    small status dict for the admin page / scheduler."""
+    """Fetch the DNS blocklist -> dnsmasq address= rules -> reload.
+
+    The source list is several MB; it is streamed line by line rather than
+    read whole, so the Python process never holds it all in memory. The file
+    is built under a temp name and renamed into place, so dnsmasq can never
+    read a half-written ruleset. Slow enough that callers should run it off
+    the request thread — /admin/dns does.
+
+    Returns a status dict (also kept in `blocklist_status` for the admin page,
+    since the refresh now finishes after the HTTP response has gone out)."""
     if MOCK:
         return {"ok": False, "detail": "mock mode"}
-    if not setting("dns_filter"):
-        try:
-            open(_BLOCKLIST_PATH, "w").close()
-            _reload_dnsmasq()
-        except Exception:
-            pass
-        return {"ok": True, "detail": "filtering off — cleared"}
-    import urllib.request
+    if not _blocklist_lock.acquire(blocking=False):
+        return {"ok": False, "detail": "a refresh is already running"}
+    blocklist_status["running"] = True
     try:
-        with urllib.request.urlopen(setting("dns_blocklist_url"), timeout=30) as r:
-            lines = r.read().decode("utf-8", "replace").splitlines()
+        if not setting("dns_filter"):
+            try:
+                open(_BLOCKLIST_PATH, "w").close()
+                _reload_dnsmasq()
+            except Exception as e:
+                return _blocklist_result(False, str(e)[:200])
+            return _blocklist_result(True, "filtering off — cleared")
+        import urllib.request
+        tmp = _BLOCKLIST_PATH + ".tmp"
         n = 0
-        with open(_BLOCKLIST_PATH, "w") as out:
-            for ln in lines:
-                ln = ln.strip()
-                if not ln or ln.startswith("#"):
-                    continue
-                parts = ln.split()
-                dom = parts[1] if len(parts) >= 2 else parts[0]
-                if "." not in dom or dom in (
-                        "localhost", "localhost.localdomain", "broadcasthost", "0.0.0.0"):
-                    continue
-                out.write("address=/%s/0.0.0.0\n" % dom)
-                n += 1
-        _reload_dnsmasq()
-        app.logger.info("dns blocklist installed: %d domains", n)
-        return {"ok": True, "detail": f"{n} domains"}
-    except Exception as e:
-        app.logger.warning("blocklist refresh failed: %s", e)
-        return {"ok": False, "detail": str(e)[:200]}
+        try:
+            with urllib.request.urlopen(setting("dns_blocklist_url"), timeout=30) as r, \
+                    open(tmp, "w") as out:
+                for rule in _blocklist_rules(r):   # streamed, never held whole
+                    out.write(rule)
+                    n += 1
+            os.replace(tmp, _BLOCKLIST_PATH)       # atomic swap
+            _reload_dnsmasq()
+            app.logger.info("dns blocklist installed: %d domains", n)
+            return _blocklist_result(True, f"{n:,} domains")
+        except Exception as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            app.logger.warning("blocklist refresh failed: %s", e)
+            return _blocklist_result(False, str(e)[:200])
+    finally:
+        blocklist_status["running"] = False
+        _blocklist_lock.release()
 
 
 # ---------- reconcile: align kernel state with the DB ----------

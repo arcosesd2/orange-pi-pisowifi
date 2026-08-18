@@ -41,6 +41,15 @@
     <b>Whitelist</b> = always-on free internet (your phone, CCTV, POS) — these also get
     full access to this box (SSH/admin). <b>Blacklist</b> = fully blocked.
   </p>
+  <p class="muted" style="background:#78350f33;border:1px solid #78350f;border-radius:9px;
+            padding:10px 12px;color:#fde68a;line-height:1.5">
+    <b>Adding the first whitelist entry locks this panel down.</b> Until one exists,
+    admin is reachable from the customer network — after that, only whitelisted
+    devices, the machine itself, or a private path like Tailscale can open it.
+    Whitelist your own phone first. To recover a lockout, set
+    <code>"admin_lan_access": "any"</code> in <code>/etc/pisowifi/config.json</code>
+    and restart the service.
+  </p>
 
   <h2>Add a device</h2>
   <form method="post" action="/admin/devices/add">

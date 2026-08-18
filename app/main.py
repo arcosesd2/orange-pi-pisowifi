@@ -10,6 +10,7 @@ Flask app serving:
 Run: PISOWIFI_CONFIG=/etc/pisowifi/config.json python3 main.py
 """
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -29,7 +30,7 @@ import firewall
 import pppoe
 import shaper
 from coinslot import CoinSlot
-from db import Db
+from db import Db, DEFAULT_ADMIN_PASSWORD
 from diagnostics import PinManager, EINT_PINS, HEADER
 from remote import RemoteReporter
 from scheduler import Scheduler
@@ -128,7 +129,13 @@ DEFAULTS = {
     "remote_interval_s": 300,
     "device_id": "",
 
-    "admin_password": "changeme",
+    "admin_password": DEFAULT_ADMIN_PASSWORD,
+    # Who may reach /admin from the customer LAN. The portal port has to be
+    # open to every client for the captive portal to work, so /admin sits on a
+    # port customers can reach — this decides whether they get past the door.
+    #   "whitelist" (default) — only whitelisted devices, once one exists
+    #   "any"                 — pre-v2.5 behavior; only for a lab/bench setup
+    "admin_lan_access": "whitelist",
 }
 
 HW_KEYS = ("coin_gpio_pin", "coin_edge", "coin_bounce_ms", "relay_gpio_pin",
@@ -201,6 +208,70 @@ def _csrf_guard():
 
 def _audit(action, detail=None):
     db.log_audit(action, detail, request.remote_addr)
+
+
+# ---------- admin exposure control ----------
+# The captive portal forces the portal port open to every client, and /admin
+# lives on that same port — so without this guard any customer on the open
+# SSID could reach the login form and start guessing. The rule: customers are
+# refused at the door; the owner reaches admin either from a whitelisted
+# device, from the box itself, or over a private path like Tailscale.
+#
+# The bootstrap hole is deliberate and closes itself: SSH is blocked on both
+# interfaces after install, so on a fresh machine there is no other way in.
+# Admin stays LAN-reachable until the first device is whitelisted, and adding
+# that device is what locks the machine down.
+
+def _customer_net():
+    """The customer subnet, derived from the gateway address."""
+    try:
+        return ipaddress.ip_network(f"{setting('gateway_ip')}/24", strict=False)
+    except ValueError:
+        return None
+
+
+def _from_customer_lan():
+    """True if this request came from a client on the customer network.
+    Anything else — localhost, Tailscale, another interface — is the owner."""
+    net = _customer_net()
+    if not net:
+        return False
+    try:
+        return ipaddress.ip_address(request.remote_addr or "") in net
+    except ValueError:
+        return False
+
+
+def _admin_lan_denied():
+    """Why (if at all) this request must not reach /admin. None = allowed."""
+    if (setting("admin_lan_access") or "whitelist") == "any":
+        return None
+    if not _from_customer_lan():
+        return None                      # box itself / Tailscale / other iface
+    if not db.has_whitelist():
+        return None                      # fresh machine — see note above
+    if db.is_whitelisted(client_mac()):
+        return None
+    return ("Admin is not reachable from the customer network on this machine.\n\n"
+            "Open it from a whitelisted device, from the machine itself, or over "
+            "Tailscale. To recover a lockout, set \"admin_lan_access\": \"any\" in "
+            "/etc/pisowifi/config.json and restart the pisowifi service.")
+
+
+@app.before_request
+def _admin_guard():
+    """Door policy for /admin: who may reach it, and the forced first-run
+    password change once they have."""
+    if not request.path.startswith("/admin"):
+        return None
+    denied = _admin_lan_denied()
+    if denied:
+        return denied, 403
+    # A machine still on the shipped password can do nothing but change it.
+    if (admin_ok() and db.admin_password_is_default()
+            and request.path not in ("/admin/setup", "/admin/logout")):
+        return redirect("/admin/setup")
+    return None
 
 
 # ---------- settings: DB overrides config.json defaults ----------
@@ -417,6 +488,45 @@ _VCHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no ambiguous 0/O/1/I
 
 def _gen_code(n=6):
     return "".join(secrets.choice(_VCHARS) for _ in range(n))
+
+
+# ---------- admin login throttling ----------
+# The sliding window above is keyed on the client IP, which a customer chooses
+# for themselves (renew the lease, or just set a static address), so on its own
+# it is no brake at all on password guessing. Lockouts are therefore keyed on
+# the MAC — changing that drops the DHCP lease and the session with it — and
+# they back off exponentially instead of resetting every minute.
+
+_LOGIN_FAILS = {}                  # key -> [consecutive_failures, locked_until]
+_LOGIN_FAILS_LOCK = threading.Lock()
+_LOGIN_FREE_TRIES = 5
+_LOGIN_MAX_LOCK_S = 3600
+
+
+def _login_key():
+    return client_mac() or request.remote_addr or "?"
+
+
+def _login_lock_remaining(key):
+    with _LOGIN_FAILS_LOCK:
+        rec = _LOGIN_FAILS.get(key)
+        return max(0, int(rec[1] - time.time())) if rec else 0
+
+
+def _login_failed(key):
+    """Record a failure and arm the next lockout: 1 min, 2, 4, 8… up to an hour."""
+    with _LOGIN_FAILS_LOCK:
+        rec = _LOGIN_FAILS.setdefault(key, [0, 0.0])
+        rec[0] += 1
+        if rec[0] >= _LOGIN_FREE_TRIES:
+            back = min(_LOGIN_MAX_LOCK_S, 60 * 2 ** (rec[0] - _LOGIN_FREE_TRIES))
+            rec[1] = time.time() + back
+        return rec[0]
+
+
+def _login_succeeded(key):
+    with _LOGIN_FAILS_LOCK:
+        _LOGIN_FAILS.pop(key, None)
 
 
 # ---------- client portal ----------
@@ -700,20 +810,65 @@ def _admin_api_guard():
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        if rate_limited("login:" + (request.remote_addr or "?"), 5, 60):
+        key = _login_key()
+        locked = _login_lock_remaining(key)
+        if locked:
+            mins = max(1, locked // 60)
+            _audit("login blocked (locked out)", key)
             return render_template(
-                "admin_login.html", error="Too many attempts — wait a minute."), 429
+                "admin_login.html",
+                error=f"Too many failed attempts — locked for ~{mins} min."), 429
         pw = request.form.get("password") or ""
         # verify_admin seeds/upgrades the legacy plaintext to a hash on first use
         if db.verify_admin(pw, legacy_plaintext=setting("admin_password")):
+            _login_succeeded(key)
             websession.permanent = True
             websession["admin"] = True
             _csrf_token()
             _audit("admin login")
-            return redirect("/admin")
-        _audit("failed login")
+            return redirect("/admin/setup" if db.admin_password_is_default()
+                            else "/admin")
+        n = _login_failed(key)
+        _audit("failed login", f"{key} (attempt {n})")
         return render_template("admin_login.html", error="Wrong password")
     return render_template("admin_login.html", error=None)
+
+
+@app.route("/admin/setup", methods=["GET", "POST"])
+def admin_setup():
+    """Forced first-run password change. A machine on the shipped password is
+    treated as unconfigured — every other admin page bounces here until it is
+    changed, so a box can't be left in the field on `changeme`."""
+    if not admin_ok():
+        return redirect("/admin/login")
+    if not db.admin_password_is_default():
+        return redirect("/admin")
+    error = None
+    if request.method == "POST":
+        pw = request.form.get("password") or ""
+        if pw != (request.form.get("confirm") or ""):
+            error = "The two passwords don't match."
+        elif len(pw) < 8:
+            error = "Use at least 8 characters."
+        elif pw == DEFAULT_ADMIN_PASSWORD:
+            error = "That's the shipped default — pick something else."
+        else:
+            db.set_admin_password(pw)
+            # drop the plaintext seed so the legacy fallback can't be used again
+            db.set_setting("admin_password", "")
+            mac = client_mac()
+            # Whitelisting the device that does the setup keeps the owner's own
+            # access working the moment the machine locks down.
+            if mac and request.form.get("whitelist_me") == "on":
+                db.set_device(mac, "white", "owner (set up this machine)")
+                if not MOCK:
+                    firewall.whitelist_add(mac)
+                _audit("device add", f"white {mac} (first-run)")
+            _audit("admin password set (first run)")
+            return redirect("/admin")
+    return render_template("admin_setup.html", name=setting("hotspot_name"),
+                           error=error, mac=client_mac(),
+                           on_lan=_from_customer_lan())
 
 
 @app.route("/admin/logout")

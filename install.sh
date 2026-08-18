@@ -138,6 +138,27 @@ cp -r "$SRC/app/." /opt/pisowifi/
 rm -rf /opt/pisowifi/__pycache__ /opt/pisowifi/dev.db
 [ -f /etc/pisowifi/config.json ] || cp "$SRC/app/config.json" /etc/pisowifi/config.json
 
+# The config holds the admin password (until first login) and the remote
+# dashboard key; the database holds PPPoE passwords in the clear, because CHAP
+# needs them that way. Keep both off-limits to any other local account.
+chmod 700 /etc/pisowifi /var/lib/pisowifi
+chmod 600 /etc/pisowifi/config.json
+
+# Never leave a machine in the field reachable on the password this project
+# ships with. Mint a random one on first install and print it once at the end.
+ADMIN_PW=""
+if python3 -c "import json,sys; sys.exit(0 if json.load(open('/etc/pisowifi/config.json')).get('admin_password')=='changeme' else 1)"; then
+    ADMIN_PW="$(python3 -c 'import secrets;print(secrets.token_urlsafe(12))')"
+    python3 - "$ADMIN_PW" <<'PY'
+import json, sys
+p = "/etc/pisowifi/config.json"
+c = json.load(open(p))
+c["admin_password"] = sys.argv[1]
+json.dump(c, open(p, "w"), indent=2)
+PY
+    chmod 600 /etc/pisowifi/config.json
+fi
+
 # Keep the app's view of the interfaces in sync with what we wire below, so
 # per-client QoS (shaper) and lan_vlan resolve to the same device as nftables.
 python3 - "$LAN_IF" "$WAN_IF" "$GW_IP" "${LAN_VLAN:-0}" <<'PY'
@@ -303,5 +324,24 @@ systemctl restart pisowifi-net nftables dnsmasq pisowifi
 [ "$PPPOE_EN" = "1" ] && systemctl restart pppoe-server 2>/dev/null || true
 
 echo
-echo "DONE. Portal: http://$GW_IP:8080   Admin: http://$GW_IP:8080/admin (password: changeme)"
-echo "Edit /etc/pisowifi/config.json (rates, name, admin password), then: systemctl restart pisowifi"
+echo "DONE. Portal: http://$GW_IP:8080   Admin: http://$GW_IP:8080/admin"
+if [ -n "$ADMIN_PW" ]; then
+    echo
+    echo "  =============================================================="
+    echo "  ADMIN PASSWORD (generated, shown once):"
+    echo "      $ADMIN_PW"
+    echo "  =============================================================="
+    echo "  Write this down now. It is also in /etc/pisowifi/config.json"
+    echo "  (root-only) if you lose it."
+else
+    echo "  (kept the existing /etc/pisowifi/config.json — password unchanged)"
+fi
+echo
+echo "IMPORTANT — admin exposure:"
+echo "  The portal port must be open to customers, and /admin sits on it. Admin"
+echo "  stays reachable from the customer network only until you whitelist your"
+echo "  first device (Admin -> Devices). After that only whitelisted devices, the"
+echo "  machine itself, or a private path such as Tailscale can open it."
+echo "  Whitelist your own phone first, or you will lock yourself out."
+echo
+echo "Edit /etc/pisowifi/config.json (rates, name), then: systemctl restart pisowifi"

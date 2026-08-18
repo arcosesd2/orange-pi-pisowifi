@@ -73,9 +73,11 @@ is a config toggle that **defaults to off / current behavior**.
   config/DB backup & restore (clone machines).
 - **Health watchdog** — opt-in (`watchdog_enabled`): auto-recovers WAN/services.
 - **Security hardening** — the nftables ruleset now has an **input chain**:
-  LAN clients can only reach DHCP/DNS and the portal on the box — **SSH/admin are
-  no longer exposed to customers** (whitelisted devices keep full access), plus
-  source anti-spoofing.
+  LAN clients can only reach DHCP/DNS and the portal on the box — **SSH is no
+  longer exposed to customers** (whitelisted devices keep full access), plus
+  source anti-spoofing. (The *admin panel* shares the portal port and so is
+  still reachable at the TCP level by customers; it is gated in the app
+  instead — see [Admin exposure](#admin-exposure-read-this-before-you-deploy).)
 - **VLAN mode (pairs with a VLAN AP/antenna)** — set `lan_vlan` (e.g. `5`) or
   `install.sh --vlan 5`: the LAN becomes `<lan_if>.<vlan>` (e.g. `eth0.5`) so
   customer traffic arrives **tagged** from the antenna and is segmented from the
@@ -222,6 +224,54 @@ any ISP.
 For full *control* from anywhere (open the machine's own admin/diagnostics
 from your phone), install Tailscale on the board — instructions at the bottom
 of [server/README.md](server/README.md).
+
+## 5d. Admin exposure — read this before you deploy
+
+The captive portal only works if the portal port is open to every client, and
+the admin panel lives on that same port. So **customers can open a TCP
+connection to `/admin`** — the firewall can't separate them. Access is gated in
+the application instead:
+
+| Where you are | Can you open `/admin`? |
+|---|---|
+| A customer on the hotspot | **No** — 403, once any device is whitelisted |
+| A **whitelisted** device on the hotspot | Yes |
+| The machine itself (`127.0.0.1`) | Yes |
+| Tailscale / any non-customer interface | Yes |
+
+**The bootstrap:** after install, SSH is blocked on *both* interfaces (customers
+are rejected, and the WAN side is dropped outright). So on a fresh machine there
+would be no way in at all — which is why admin stays reachable from the customer
+network **until you whitelist your first device**. Adding that device is what
+locks the machine down.
+
+> **Whitelist your own phone first.** If you whitelist the CCTV first, you lock
+> yourself out of the hotspot path. The first-run setup page offers to whitelist
+> the device you're using — leave it ticked.
+>
+> **To recover a lockout:** set `"admin_lan_access": "any"` in
+> `/etc/pisowifi/config.json` and `systemctl restart pisowifi`.
+
+**Passwords.** The installer generates a random admin password and prints it
+once (it also stays in the root-only config file). If a machine is somehow still
+on the shipped `changeme`, the admin panel refuses to open anything but the
+password-change page. Login lockouts are keyed on the client's MAC and back off
+1 → 2 → 4 → … minutes, so guessing can't be reset by picking a new IP.
+
+**The one thing this does not fix:** the SSID is open, so an admin login over the
+hotspot crosses the air in cleartext and can be sniffed. For real remote
+administration install **Tailscale** on the board (see
+[server/README.md](server/README.md)) and use that instead — it's encrypted end
+to end and reaches the box through CGNAT.
+
+**Accepted risks**, worth knowing rather than fixing:
+
+- **MAC-based access on an open network.** A sniffed MAC can be cloned to ride a
+  paid session — or a whitelisted one to gain trusted access. This is inherent to
+  every MAC-based captive portal, commercial ones included.
+- **The app runs as root** (it needs nft/tc/GPIO), so any bug in it is a root bug.
+- **Physical access to the SD card** yields the database (PPPoE passwords are
+  necessarily plaintext for CHAP) and the config. Nothing is encrypted at rest.
 
 ## 6. How the enforcement works (the important trick)
 

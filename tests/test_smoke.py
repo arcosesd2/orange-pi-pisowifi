@@ -39,24 +39,37 @@ check("captive probe redirects", c.get("/generate_204").status_code, 302)
 check("unknown path redirects to portal", c.get("/anything/else").status_code, 302)
 
 # ---- admin (log in without touching the stored password) ----
+# A machine on the shipped password bounces every admin page to /admin/setup,
+# so put this dev database in a "configured" state first and restore it after.
+# (Requests from the test client come from 127.0.0.1, which the admin door
+# policy treats as the owner rather than a customer — see test_security.py.)
+_prev_pw = {k: main.db.get_setting(k) for k in ("admin_pw_hash", "admin_pw_default")}
+if main.db.admin_password_is_default():
+    main.db.set_admin_password("smoke-test-password", is_default=False)
+
 with c.session_transaction() as s:
     s["admin"] = True
 
-for path in ("/admin", "/admin/vouchers", "/admin/devices", "/admin/audit",
-             "/admin/branding", "/admin/schedules", "/admin/pppoe", "/admin/diag"):
-    check(f"renders {path}", c.get(path).status_code, 200)
+try:
+    for path in ("/admin", "/admin/vouchers", "/admin/devices", "/admin/audit",
+                 "/admin/branding", "/admin/schedules", "/admin/pppoe", "/admin/diag"):
+        check(f"renders {path}", c.get(path).status_code, 200)
 
-for path in ("/admin/backup", "/admin/backup?sales=1",
-             "/admin/sales.csv", "/admin/vouchers.csv"):
-    check(f"downloads {path}", c.get(path).status_code, 200)
+    for path in ("/admin/backup", "/admin/backup?sales=1",
+                 "/admin/sales.csv", "/admin/vouchers.csv"):
+        check(f"downloads {path}", c.get(path).status_code, 200)
 
-# the streaming CSV export must actually stream to completion
-check("sales csv has a header",
-      c.get("/admin/sales.csv").get_data(as_text=True).startswith("id,mac,pesos"), True)
+    # the streaming CSV export must actually stream to completion
+    check("sales csv has a header",
+          c.get("/admin/sales.csv").get_data(as_text=True).startswith("id,mac,pesos"), True)
 
-# ---- CSRF still guards state-changing admin posts ----
-check("admin post without token is rejected",
-      c.post("/admin/settings", data={"hotspot_name": "x"}).status_code, 400)
+    # ---- CSRF still guards state-changing admin posts ----
+    check("admin post without token is rejected",
+          c.post("/admin/settings", data={"hotspot_name": "x"}).status_code, 400)
+finally:
+    for k, v in _prev_pw.items():
+        if v is not None:
+            main.db.set_setting(k, v)
 
 # ---- concurrent DB use across threads ----
 errors = []

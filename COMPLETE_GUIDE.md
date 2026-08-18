@@ -128,7 +128,30 @@ bash install.sh --wan eth0 --lan eth0 --vlan 5        # customer traffic on VLAN
 ```
 The installer: installs packages (+ waitress; + pppoe when `pppoe_enabled`), renders `nftables.conf` (filling the `anti_tether`/`flow_offload` tokens from config), sets up the LAN address / VLAN device, packet‑steering/sysctl tuning unit, and enables the services. It keeps `config.json` in sync with the chosen interfaces.
 
-**Hardening checklist for a live site:** change the admin password; add your own phone/CCTV to the **whitelist** (they also get SSH access); leave `flow_offload` **off** unless you've verified it with your QoS; enable `anti_tether` if you don't want customers re‑sharing; turn on `dns_filter` + a daily `blocklist_refresh` schedule.
+**Hardening checklist for a live site** (in order):
+
+1. **Note the generated admin password** the installer prints, and set your own.
+   A machine still on the shipped `changeme` refuses to open any admin page but
+   the password-change form.
+2. **Whitelist your own phone first** (Admin → Devices). The admin panel shares
+   the customer-facing portal port, so it is gated in the app: once any device
+   is whitelisted, customers get a 403 and only whitelisted devices / the box
+   itself / a private path like Tailscale can open it. Until the first device is
+   whitelisted it stays open, because after install SSH is blocked on both
+   interfaces and there would otherwise be no way in. Recover a lockout with
+   `"admin_lan_access": "any"` in the config + a service restart.
+3. **Install Tailscale** for real remote administration. The SSID is open, so an
+   admin login over the hotspot itself is sniffable in cleartext — that is not
+   fixable at the app layer.
+4. Add your CCTV/POS to the whitelist too; add nothing you don't own (whitelisted
+   devices get free internet *and* trusted access to the box).
+5. Leave `flow_offload` **off** unless you've verified it against your QoS;
+   enable `anti_tether` if you don't want customers re-sharing; turn on
+   `dns_filter` + a daily `blocklist_refresh` schedule.
+
+**Known, accepted risks:** MAC-based access on an open SSID can be spoofed
+(inherent to the category); the app runs as root because it drives nft/tc/GPIO;
+physical possession of the SD card yields the database and config unencrypted.
 
 ### A8. Develop & test (no hardware needed)
 On any PC (Windows/Mac/Linux), the app auto‑detects "no GPIO/nft" and runs **fully mocked**:

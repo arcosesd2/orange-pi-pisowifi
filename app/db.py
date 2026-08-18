@@ -76,6 +76,10 @@ CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch);
 # Settings kept out of a downloadable backup — see export_config().
 _SECRET_SETTINGS = ("SECRET_KEY", "remote_key")
 
+# The password shipped in config.json. A machine still on it is treated as
+# unconfigured: the admin UI refuses to do anything until it is changed.
+DEFAULT_ADMIN_PASSWORD = "changeme"
+
 
 class Db:
     def __init__(self, path):
@@ -311,6 +315,24 @@ class Db:
         with self._conn() as c:
             c.execute("DELETE FROM devices WHERE mac=?", (mac,))
 
+    def is_whitelisted(self, mac):
+        """Whitelisted devices are the owner's own — they keep admin access
+        from the customer LAN once the machine is locked down."""
+        if not mac:
+            return False
+        with self._conn() as c:
+            r = c.execute("SELECT 1 FROM devices WHERE mac=? AND kind='white'",
+                          (mac.lower(),)).fetchone()
+        return r is not None
+
+    def has_whitelist(self):
+        """Whether any device has been whitelisted yet. Until one has, admin
+        stays reachable from the LAN — otherwise a fresh machine would have no
+        way in at all (SSH is blocked on both interfaces after install)."""
+        with self._conn() as c:
+            return c.execute(
+                "SELECT 1 FROM devices WHERE kind='white' LIMIT 1").fetchone() is not None
+
     def list_devices(self, kind=None):
         sql = "SELECT * FROM devices"
         args = ()
@@ -404,8 +426,16 @@ class Db:
         dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iters)
         return f"pbkdf2${iters}${salt.hex()}${dk.hex()}"
 
-    def set_admin_password(self, password):
+    def set_admin_password(self, password, is_default=False):
         self.set_setting("admin_pw_hash", self._hash_pw(password))
+        self.set_setting("admin_pw_default", bool(is_default))
+
+    def admin_password_is_default(self):
+        """True while this machine still uses the shipped password (or has no
+        password set at all). The app blocks the admin UI until it changes."""
+        if not self.get_setting("admin_pw_hash"):
+            return True
+        return bool(self.get_setting("admin_pw_default"))
 
     def verify_admin(self, password, legacy_plaintext=None):
         """Check the admin password. On first run (no hash yet) accept the
@@ -416,7 +446,8 @@ class Db:
         stored = self.get_setting("admin_pw_hash")
         if not stored:
             if legacy_plaintext is not None and _hmac.compare_digest(password, legacy_plaintext):
-                self.set_admin_password(password)
+                self.set_admin_password(
+                    password, is_default=(password == DEFAULT_ADMIN_PASSWORD))
                 return True
             return False
         try:

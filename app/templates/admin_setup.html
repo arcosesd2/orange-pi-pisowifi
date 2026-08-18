@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ name }} — Set up</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
+         min-height:100vh; display:flex; align-items:center; justify-content:center;
+         padding:24px 16px; }
+  .card { background:var(--card); border-radius:16px; padding:24px; width:100%; max-width:440px; }
+  h1 { color:var(--accent); font-size:1.2rem; margin-bottom:6px; }
+  p { font-size:.88rem; color:#94a3b8; margin-bottom:14px; line-height:1.5; }
+  label { display:block; margin:12px 0 4px; font-size:.85rem; color:#94a3b8; }
+  input { width:100%; padding:11px 12px; border-radius:9px; border:1px solid #475569;
+          background:#0f172a; color:var(--txt); font-size:1rem; }
+  button { width:100%; margin-top:18px; padding:13px; border:0; border-radius:9px;
+           background:var(--accent); color:#111; font-weight:700; font-size:1rem; cursor:pointer; }
+  .err { color:#f87171; font-size:.85rem; margin-top:10px; }
+  .note { background:#78350f33; border:1px solid #78350f; border-radius:9px;
+          padding:10px 12px; font-size:.8rem; color:#fde68a; margin-top:14px; line-height:1.5; }
+  .cb { display:flex; gap:8px; align-items:flex-start; margin-top:14px; font-size:.85rem; }
+  .cb input { width:auto; margin-top:2px; }
+  code { font-family:ui-monospace,monospace; }
+</style>
+</head>
+<body>
+  <form class="card" method="post">
+    <h1>🔒 Set an admin password</h1>
+    <p>
+      This machine is still on the password it shipped with, so anyone who can
+      reach this page can take it over. Nothing else in the admin panel will
+      open until you change it.
+    </p>
+
+    <label for="password">New admin password (8+ characters)</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" autofocus required>
+
+    <label for="confirm">Confirm it</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required>
+
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+    {% if mac %}
+    <label class="cb">
+      <input type="checkbox" name="whitelist_me" checked>
+      <span>
+        Whitelist this device (<code>{{ mac }}</code>) — recommended.
+        Whitelisted devices get free internet, admin access from the customer
+        network, and can reach this box over SSH.
+      </span>
+    </label>
+    {% endif %}
+
+    {% if on_lan %}
+    <div class="note">
+      <b>Read this before you submit.</b> Once a device is whitelisted, the admin
+      panel stops answering everyone else on the customer network — which is the
+      point. You are on that network right now, so leave the box above ticked, or
+      you will have to get back in over Tailscale or from the machine itself.
+    </div>
+    {% endif %}
+
+    <button>Save and continue</button>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+  </form>
+</body>
+</html>

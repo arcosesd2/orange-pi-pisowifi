@@ -215,8 +215,13 @@ class Deployer:
         sftp = self._client.open_sftp()
         with sftp.open(remote_path, "wb") as rf:
             rf.write(json.dumps(cfg, indent=2).encode())
+        # holds the admin password and the remote dashboard key — root only
+        try:
+            sftp.chmod(remote_path, 0o600)
+        except IOError as e:
+            self.log(f"  (warn) could not chmod {remote_path}: {e}")
         sftp.close()
-        self.log(f"  → wrote {remote_path}")
+        self.log(f"  → wrote {remote_path} (mode 600)")
 
     def close(self):
         if self._client:

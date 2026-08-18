@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ name }}</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --ok:#34d399; --txt:#e2e8f0; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
+         min-height:100vh; display:flex; flex-direction:column; align-items:center;
+         padding:24px 16px; gap:16px; }
+  h1 { font-size:1.4rem; letter-spacing:.05em; color:var(--accent); text-align:center; }
+  .card { background:var(--card); border-radius:16px; padding:20px; width:100%;
+          max-width:420px; text-align:center; }
+  .timer { font-size:2.6rem; font-variant-numeric:tabular-nums; font-weight:700; }
+  .timer.paused { color:var(--accent); }
+  .big { display:block; width:100%; padding:18px; margin-top:14px; border:0;
+         border-radius:12px; font-size:1.15rem; font-weight:700; cursor:pointer; }
+  .insert { background:var(--accent); color:#111; }
+  .start  { background:var(--ok); color:#111; }
+  .ghost  { background:transparent; color:var(--txt); border:1px solid #475569; }
+  .pesos { font-size:2rem; color:var(--ok); font-weight:700; }
+  .muted { color:#94a3b8; font-size:.9rem; margin-top:8px; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  td { padding:4px 8px; border-bottom:1px solid #334155; }
+  #err { color:#f87171; min-height:1.2em; font-size:.9rem; }
+  .hide { display:none; }
+  .banner { width:100%; max-width:420px; max-height:130px; object-fit:cover; border-radius:12px; }
+</style>
+{% if brand.color %}<style>:root { --accent:{{ brand.color }}; }</style>{% endif %}
+</head>
+<body>
+  {% if brand.banner %}<img class="banner" src="/branding/{{ brand.banner }}" alt="">{% endif %}
+  <h1>{% if brand.logo %}<img src="/branding/{{ brand.logo }}" alt="" style="height:1.3em;vertical-align:middle;margin-right:6px">{% else %}📶 {% endif %}{{ name }}</h1>
+  <div id="err"></div>
+
+  <!-- active time -->
+  <div class="card" id="timeCard">
+    <div class="muted">YOUR TIME</div>
+    <div class="timer" id="timer">--:--:--</div>
+    {% if brand.show_pause %}
+    <button class="big ghost hide" id="pauseBtn">⏸ Pause time</button>
+    <button class="big start hide" id="resumeBtn">▶ Resume time</button>
+    {% endif %}
+    {% if wallet_enabled %}
+    <button class="big ghost hide" id="saveBtn">💾 Save my time &amp; disconnect</button>
+    {% endif %}
+  </div>
+
+  <!-- vending -->
+  <div class="card" id="vendCard">
+    <div id="idleView">
+      <button class="big insert" id="insertBtn">🪙 INSERT COIN</button>
+      <div class="muted">Tap first, then drop your coins</div>
+    </div>
+    <div id="insertView" class="hide">
+      <div class="muted">INSERTED</div>
+      <div class="pesos"><span id="pesos">0</span> ₱ → <span id="mins">0</span> min</div>
+      <div class="muted">Slot closes in <span id="windowLeft">60</span>s</div>
+      <button class="big start" id="doneBtn">✅ START BROWSING</button>
+    </div>
+  </div>
+
+  {% if trial_enabled and brand.show_trial %}
+  <div class="card">
+    <div class="muted">TRY IT FREE</div>
+    <button class="big ghost" id="trialBtn">🎁 Free {{ trial_minutes }} minutes</button>
+  </div>
+  {% endif %}
+
+  {% if wallet_enabled %}
+  <div class="card hide" id="walletCard">
+    <div class="muted">SAVED CREDIT: <span id="walletBal">0</span> min</div>
+    <button class="big start" id="walletUseBtn">▶ Use saved credit</button>
+  </div>
+  {% endif %}
+
+  {% if brand.show_redeem %}
+  <!-- voucher -->
+  <div class="card">
+    <div class="muted">HAVE A CODE?</div>
+    <input id="code" placeholder="ENTER VOUCHER CODE" autocomplete="off"
+           style="width:100%;padding:12px;margin-top:8px;text-transform:uppercase;
+                  border-radius:10px;border:1px solid #475569;background:#0f172a;
+                  color:var(--txt);text-align:center;font-size:1.1rem;letter-spacing:.12em">
+    <button class="big start" id="redeemBtn">🎟 REDEEM CODE</button>
+  </div>
+  {% endif %}
+
+  <!-- rates -->
+  <div class="card">
+    <div class="muted">RATES</div>
+    <table>
+      {% for p, m in rates %}
+      <tr><td>₱{{ p }}</td>
+          <td>{% if m >= 60 %}{{ m // 60 }}h{% if m % 60 %} {{ m % 60 }}m{% endif %}{% else %}{{ m }} minutes{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = s => {
+  s = Math.max(0, s|0);
+  return [s/3600|0, s/60%60|0, s%60|0].map(n => String(n).padStart(2,'0')).join(':');
+};
+async function post(url) {
+  const r = await fetch(url, {method:'POST'});
+  const j = await r.json().catch(() => ({}));
+  $('err').textContent = r.ok ? '' : (j.error || 'Something went wrong');
+  refresh();
+}
+const on = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
+on('insertBtn', () => post('/api/insert'));
+on('doneBtn',   () => post('/api/done'));
+on('pauseBtn',  () => post('/api/pause'));
+on('resumeBtn', () => post('/api/resume'));
+on('saveBtn',   () => post('/api/wallet/save'));
+on('trialBtn',  () => post('/api/trial'));
+on('walletUseBtn', () => post('/api/wallet/use'));
+on('redeemBtn', async () => {
+  const code = $('code').value.trim();
+  if (!code) return;
+  const r = await fetch('/api/redeem', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({code})});
+  const j = await r.json().catch(() => ({}));
+  $('err').textContent = r.ok ? '' : (j.error || 'Invalid code');
+  if (r.ok) $('code').value = '';
+  refresh();
+});
+const tog = (id, c) => { const e = $(id); if (e) e.classList.toggle('hide', c); };
+
+function render(j) {
+  if (!j || j.error) { if (j && j.error) $('err').textContent = j.error; return; }
+  $('timer').textContent = fmt(j.remaining);
+  $('timer').classList.toggle('paused', j.paused);
+  tog('pauseBtn', j.paused || j.remaining <= 0);
+  tog('resumeBtn', !j.paused);
+  tog('saveBtn', j.remaining <= 0);
+  if ($('walletCard')) {
+    tog('walletCard', !(j.wallet > 0));
+    if ($('walletBal')) $('walletBal').textContent = Math.floor((j.wallet || 0) / 60);
+  }
+  const open = j.window.open;
+  $('idleView').classList.toggle('hide', open);
+  $('insertView').classList.toggle('hide', !open);
+  if (open) {
+    $('pesos').textContent = j.window.pesos;
+    $('mins').textContent = j.projected_minutes;
+    $('windowLeft').textContent = j.window.seconds_left;
+  }
+  document.title = (j.remaining <= 0 && !open) ? '🪙 Insert coin — ' + BASE_TITLE
+                 : (j.paused ? '⏸ ' : '') + fmt(j.remaining) + ' — ' + BASE_TITLE;
+}
+async function refresh() {
+  try { render(await (await fetch('/api/status')).json()); }
+  catch (e) { /* portal unreachable; keep trying */ }
+}
+const BASE_TITLE = document.title;
+{% if sse_enabled %}
+try {
+  const es = new EventSource('/api/stream');
+  es.onmessage = (ev) => { try { render(JSON.parse(ev.data)); } catch (e) {} };
+} catch (e) {}
+refresh();
+setInterval(refresh, 5000);   // slow safety poll alongside SSE
+{% else %}
+refresh();
+setInterval(refresh, 1000);
+{% endif %}
+</script>
+</body>
+</html>

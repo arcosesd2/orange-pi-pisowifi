@@ -1,0 +1,22 @@
+[Unit]
+Description=PisoWiFi portal and vending server
+After=network.target nftables.service pisowifi-net.service
+Wants=nftables.service pisowifi-net.service
+
+[Service]
+Type=simple
+Environment=PISOWIFI_CONFIG=/etc/pisowifi/config.json
+ExecStart=/usr/bin/python3 /opt/pisowifi/main.py
+Restart=always
+RestartSec=3
+User=root
+
+# The app needs root for nft / tc / GPIO, so it can't be fully sandboxed —
+# but these three cost nothing and close the easy paths: no setuid
+# escalation, no access to /home or /root, and its own private /tmp.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

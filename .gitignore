@@ -1,0 +1,23 @@
+# --- Python build artifacts ---
+__pycache__/
+*.py[cod]
+
+# --- Local dev + runtime state (must never reach a board) ---
+# dev.db is the mock-mode database used when running on Windows; it holds a
+# development SECRET_KEY and test settings.
+app/dev.db
+app/branding/
+*.db-wal
+*.db-shm
+
+# --- Cloud dashboard runtime state ---
+server/dashboard.db
+
+# --- Smoke-test cookie jars (contain signed session tokens) ---
+server/cookies.txt
+server/dashcookies.txt
+server/c2.txt
+
+# --- Deployer build output (rebuild with deployer/build.ps1) ---
+deployer/build/
+deployer/dist/

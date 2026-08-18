@@ -1,0 +1,75 @@
+{
+  "hotspot_name": "AJ PisoWiFi",
+  "lan_if": "eth1",
+  "wan_if": "eth0",
+  "lan_vlan": 0,
+  "gateway_ip": "10.0.0.1",
+  "portal_port": 8080,
+
+  "coin_gpio_pin": 3,
+  "coin_edge": "falling",
+  "coin_bounce_ms": 30,
+  "relay_gpio_pin": 11,
+  "relay_active_low": true,
+  "denominations": { "1": 1, "5": 5, "10": 10, "20": 20 },
+  "pulse_value_pesos": 1,
+  "pulse_end_gap_s": 0.7,
+  "insert_window_s": 60,
+
+  "minutes_per_peso": 20,
+  "bonus_tiers": { "5": 120, "10": 260, "15": 400, "20": 560 },
+
+  "speed_profiles": {
+    "default": { "up": "3mbit", "down": "5mbit" },
+    "fast": { "up": "5mbit", "down": "10mbit" },
+    "unlimited": null
+  },
+  "default_speed": "unlimited",
+  "rate_speed": {},
+
+  "walled_hosts": [],
+  "walled_domains": [],
+  "reconcile_interval_s": 20,
+
+  "watchdog_enabled": false,
+  "watchdog_interval_s": 60,
+  "watchdog_wan_host": "8.8.8.8",
+  "watchdog_services": ["dnsmasq"],
+  "watchdog_reboot_after": 0,
+  "watchdog_reboot": false,
+
+  "gaming_priority": false,
+  "anti_tether": false,
+  "flow_offload": false,
+
+  "trial_enabled": false,
+  "trial_minutes": 15,
+  "trial_period_hours": 24,
+  "trial_speed": null,
+
+  "wallet_enabled": false,
+  "wallet_save_leftover": false,
+
+  "branding": {
+    "color": "#fbbf24", "logo": "", "banner": "",
+    "show_redeem": true, "show_trial": true, "show_pause": true
+  },
+
+  "sse_enabled": false,
+
+  "dns_filter": false,
+  "dns_blocklist_url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+
+  "schedules": [],
+
+  "pppoe_enabled": false,
+
+  "remote_enabled": false,
+  "remote_url": "",
+  "remote_key": "",
+  "remote_interval_s": 300,
+  "device_id": "",
+
+  "admin_password": "changeme",
+  "db_path": "/var/lib/pisowifi/pisowifi.db"
+}

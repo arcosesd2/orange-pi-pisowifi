@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin login</title>
+<style>
+  body { font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0;
+         min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  form { background:#1e293b; padding:28px; border-radius:16px; display:flex;
+         flex-direction:column; gap:12px; width:min(90vw, 320px); }
+  input, button { padding:12px; border-radius:8px; border:1px solid #475569;
+                  background:#0f172a; color:#e2e8f0; font-size:1rem; }
+  button { background:#fbbf24; color:#111; border:0; font-weight:700; cursor:pointer; }
+  .err { color:#f87171; font-size:.9rem; min-height:1em; }
+</style>
+</head>
+<body>
+  <form method="post">
+    <strong>🔐 PisoWiFi Admin</strong>
+    <div class="err">{{ error or '' }}</div>
+    <input type="password" name="password" placeholder="Password" autofocus>
+    <button>Log in</button>
+  </form>
+</body>
+</html>

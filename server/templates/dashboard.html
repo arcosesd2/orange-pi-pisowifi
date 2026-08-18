@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PisoWiFi Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; --dim:#94a3b8; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
+         padding:24px 16px; max-width:860px; margin:0 auto; }
+  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:16px; }
+  .card { background:var(--card); border-radius:14px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin:10px 0; }
+  .stat { background:#0f172a; border-radius:10px; padding:10px 14px; flex:1; min-width:96px; }
+  .stat b { font-size:1.35rem; display:block; color:var(--txt); }
+  .stat span { font-size:.75rem; color:var(--dim); }
+  .badge { display:inline-block; padding:2px 10px; border-radius:8px; font-size:.75rem; font-weight:700; }
+  .on { background:#166534; color:#bbf7d0; } .off { background:#7f1d1d; color:#fecaca; }
+  .muted { color:var(--dim); font-size:.8rem; }
+  .bars { display:flex; gap:4px; align-items:flex-end; height:64px; margin-top:10px; }
+  .bars div { flex:1; background:var(--accent); border-radius:3px 3px 0 0; min-height:2px; position:relative; }
+  .bars div i { position:absolute; top:-16px; left:0; right:0; text-align:center;
+                font-size:.6rem; color:var(--dim); font-style:normal; }
+  input, button { padding:10px 14px; border-radius:8px; border:1px solid #475569;
+                  background:#0f172a; color:var(--txt); font-size:1rem; }
+  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
+  .err { color:#f87171; margin:10px 0; }
+</style>
+</head>
+<body>
+  <h1>📶 PisoWiFi Dashboard</h1>
+
+  {% if login %}
+    <div class="card">
+      {% if error %}<p class="err">{{ error }}</p>{% endif %}
+      <form method="post" action="/login">
+        <input name="password" type="password" placeholder="Password" autofocus>
+        <button>Enter</button>
+      </form>
+    </div>
+  {% else %}
+    <div id="devices"><p class="muted">Loading…</p></div>
+    <p class="muted" id="foot"></p>
+
+<script>
+const peso = n => '₱' + (n ?? 0).toLocaleString();
+async function refresh() {
+  let d;
+  try { d = await (await fetch('/api/devices')).json(); } catch { return; }
+  if (d.error) { location = '/login'; return; }
+  const wrap = document.getElementById('devices');
+  if (!d.devices.length) {
+    wrap.innerHTML = '<div class="card"><p class="muted">No machines have reported yet. ' +
+      'On each machine: Admin → Remote monitoring → set this server\'s URL + key → Send test report.</p></div>';
+    return;
+  }
+  wrap.innerHTML = d.devices.map(dev => {
+    const s = dev.sales, max = Math.max(1, ...dev.days.map(x => x.pesos));
+    return `<div class="card">
+      <b>${dev.name}</b> <span class="muted">(${dev.id})</span>
+      <span class="badge ${dev.online ? 'on' : 'off'}">${dev.online ? 'ONLINE' : 'OFFLINE'}</span>
+      <span class="muted">seen ${fmtAgo(dev.last_seen_s)} ago</span>
+      <div class="row">
+        <div class="stat"><span>Today</span><b>${peso(s.today?.pesos)}</b><span>${s.today?.count ?? 0} sales</span></div>
+        <div class="stat"><span>7 days</span><b>${peso(s.week?.pesos)}</b><span>${s.week?.count ?? 0} sales</span></div>
+        <div class="stat"><span>All time</span><b>${peso(s.all_time?.pesos)}</b><span>${s.all_time?.count ?? 0} sales</span></div>
+        <div class="stat"><span>Clients now</span><b>${dev.active_clients}</b><span>&nbsp;</span></div>
+      </div>
+      <div class="bars">${dev.days.map(x =>
+        `<div style="height:${Math.round(x.pesos / max * 100)}%" title="${x.day}: ${peso(x.pesos)}">
+           <i>${x.pesos || ''}</i></div>`).join('')}</div>
+      <p class="muted">last 14 days · ${sysline(dev.sys)}</p>
+    </div>`;
+  }).join('');
+  document.getElementById('foot').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+const fmtAgo = s => s < 90 ? s + 's' : s < 5400 ? Math.round(s/60) + 'm' : Math.round(s/3600) + 'h';
+const sysline = s => [
+  s.version ? 'v' + s.version : null,
+  s.uptime_s !== undefined ? 'up ' + Math.floor(s.uptime_s/3600) + 'h' : null,
+  s.cpu_temp_c !== undefined ? 'CPU ' + s.cpu_temp_c + '°C' : null,
+  s.mem_free_mb !== undefined ? s.mem_free_mb + ' MB free' : null,
+].filter(Boolean).join(' · ');
+refresh();
+setInterval(refresh, 30000);
+</script>
+  {% endif %}
+</body>
+</html>

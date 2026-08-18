@@ -1,0 +1,15 @@
+# This project is edited on Windows and executed on Linux (Armbian). Anything
+# the board runs — shell scripts, Python, systemd units, nft/dnsmasq/hostapd
+# configs — must keep LF endings, or the board's interpreters choke on \r.
+# (deploy.ps1 strips CRLF on upload as a second safety net.)
+* text=auto eol=lf
+
+# Windows-only tooling keeps native CRLF.
+*.ps1 text eol=crlf
+
+# Never touch these.
+*.db binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.ico binary

@@ -22,6 +22,7 @@ to python3-libgpiod (gpiod.request_lines with edge detection) — the rest of
 this module is hardware-agnostic.
 """
 import collections
+import sys
 import threading
 import time
 
@@ -61,8 +62,23 @@ class CoinSlot:
         self.last_train = None    # {"pulses": n, "pesos": x, "ago": ts, "credited": bool}
         self.relay_state = False
 
+        self.gpio_error = None
         if not self.mock:
-            self._setup_gpio()
+            # The import guard above only catches ImportError. OPi.GPIO can
+            # import perfectly well and still fail here against the kernel's
+            # actual GPIO layout -- on 6.6+ the sysfs chip base moved (this H3
+            # exposes gpiochip0 AND gpiochip352), so exporting a computed pin
+            # number raises instead of returning. That must not be fatal: this
+            # runs at import time, so an escaping exception takes down the whole
+            # portal -- vouchers, live sessions, admin and all -- over a coin
+            # slot. Degrade to mock and make the reason visible instead.
+            try:
+                self._setup_gpio()
+            except Exception as e:
+                self.mock = True
+                self.gpio_error = f"{type(e).__name__}: {e}"
+                print(f"coinslot: GPIO unavailable, running MOCKED -- coins will "
+                      f"NOT be counted: {self.gpio_error}", file=sys.stderr, flush=True)
         self._relay(False)
 
         t = threading.Thread(target=self._watcher, daemon=True)
@@ -105,7 +121,16 @@ class CoinSlot:
             self.cfg = dict(cfg)
             if rearm and not self.mock:
                 self._teardown_gpio(old)
-                self._setup_gpio()
+                # Same reasoning as at construction, plus one of its own: this
+                # runs inside an admin request, so an escaping exception would
+                # 500 the Hardware page and leave the slot half-armed.
+                try:
+                    self._setup_gpio()
+                except Exception as e:
+                    self.mock = True
+                    self.gpio_error = f"{type(e).__name__}: {e}"
+                    print(f"coinslot: re-arm failed, running MOCKED: "
+                          f"{self.gpio_error}", file=sys.stderr, flush=True)
         if rearm:
             self._relay(self._window_mac is not None)
 

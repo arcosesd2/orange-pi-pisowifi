@@ -172,9 +172,23 @@ if ($gpio -ne "real") {
 
 $svc = (ssh $dest "systemctl is-active pisowifi pisowifi-detect nftables dnsmasq | tr '\n' ' '") -join ""
 if ($svc -match "inactive|failed") {
-    $problems += "A service is not running: $svc  (check: ssh $dest 'journalctl -u pisowifi -n 50')"
     Bad "services: $svc"
+    # Print the failure here rather than telling the operator to go and look.
+    # The firewall can seal this board off seconds later, and then nobody can
+    # go and look -- this is the one moment the logs are reachable.
+    Warn "last 25 log lines from pisowifi:"
+    ssh $dest 'journalctl -u pisowifi -n 25 --no-pager 2>&1 | tail -25' |
+        ForEach-Object { Write-Host "      $_" -ForegroundColor DarkGray }
+    $problems += "A service is not running: $svc  (log printed above)"
 } else { Ok "services: $svc" }
+
+# A mocked coin slot is not a crash, so nothing above catches it -- the portal
+# serves happily and silently never counts a coin.
+$mockWarn = (ssh $dest "journalctl -u pisowifi -b --no-pager 2>/dev/null | grep -m1 'coinslot: GPIO unavailable'") -join ""
+if ($mockWarn) {
+    $problems += "The coin slot armed as MOCK, so coins will not be counted: $mockWarn"
+    Bad "coin slot is mocked -- $mockWarn"
+}
 
 # Single-quoted: PowerShell expands $( ) inside double quotes, so a double-quoted
 # version of this ran seq and curl on Windows instead of sending them to the

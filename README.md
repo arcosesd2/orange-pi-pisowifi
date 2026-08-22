@@ -12,18 +12,23 @@ with custom portal/vending software (Python 3 + Flask) in [`app/`](app/).
                         └──────────────────────────────┘
 ```
 
-**Two supported topologies** (chosen at install time):
+**Two supported topologies** — you don't choose, the board works it out at every
+boot from the hardware plugged into it:
 
-| Topology | LAN interface | Install command | Who broadcasts WiFi |
+| Topology | Customer LAN | Detected because | Who broadcasts WiFi |
 |---|---|---|---|
-| **Wired antenna** (recommended) | `eth1` (USB-ethernet) | `bash install.sh --wired` | an external AP/antenna (e.g. CF-EW73) |
-| Own radio | `wlan0` (USB WiFi) | `bash install.sh --hostapd 1` | the Pi itself (hostapd) |
+| **Wired antenna** (recommended) | the USB-ethernet dongle | it's on the USB bus, the uplink is on the SoC bus | an external AP/antenna (e.g. CF-EW73) |
+| Own radio | the USB WiFi adapter | no ethernet dongle present, so hostapd is switched on | the Pi itself (hostapd) |
 
-`--wired` is the standard vendo layout: **eth0 = internet uplink**, **eth1 = the antenna's
-LAN**. It renames the USB-ethernet dongle to `eth1` and pins it by MAC (udev) so it stays
-`eth1` across reboots, and it skips hostapd (the antenna is the access point). No VLAN is
-needed when the antenna has its own dedicated port; the antenna simply bridges its SSID
-untagged into `eth1`.
+The wired layout is the standard vendo build: **onboard NIC = internet uplink**,
+**USB-ethernet dongle = the antenna's LAN**, no hostapd (the antenna is the
+access point). No VLAN is needed when the antenna has a dedicated port; it just
+bridges its SSID untagged into the dongle.
+
+Nothing about a specific board is stored on the card — no MAC pinning, no
+interface names in unit files — which is what lets one SD card image be cloned
+across a whole fleet. Override with `install.sh --lan <if> --wan <if>` if you'd
+rather pin them. See [section 8](#8-rolling-out-more-machines-plug-and-play-cards).
 
 ---
 
@@ -136,10 +141,41 @@ the gap between pulses in ms).
 
 ## 3. Install Armbian
 
+This is only needed for **machine #1**. Once it works you seal it into a master
+image and later cards need none of this — see
+[section 8](#8-rolling-out-more-machines-plug-and-play-cards).
+
 1. Download **Armbian Bookworm (minimal/server)** for *Orange Pi One* from armbian.com.
-2. Flash the `.img.xz` to the microSD with **USBImager** or **balenaEtcher** (from this Windows PC).
+2. Flash the `.img.xz` to the microSD with **USBImager**, **balenaEtcher**, or the
+   **Armbian installer app** (from this Windows PC).
 3. Boot with ethernet plugged into your modem/router. Find its IP (router DHCP list) and `ssh root@<ip>` (first-boot wizard: set root password, create user).
 4. `apt update && apt upgrade -y`, then `armbian-config` → set timezone.
+
+**If your flashing tool offers an autoconfig / first-boot profile** (Armbian
+writes it to `/root/.not_logged_in_yet`), fill it in — it replaces the
+interactive first-boot wizard in step 3, so the board comes up straight to a
+login the deployer can use:
+
+| Field | Value |
+|---|---|
+| Root password | a real password — this is what the deployer connects with |
+| First user → username / password | fill both in; **leaving the username empty makes Armbian stop and ask on first boot**, which blocks unattended setup |
+| Login shell | `bash` |
+| Timezone | `Asia/Manila` — scheduled tasks fire at local `HH:MM` and sales are stamped in local time |
+| Locale | `en_US.UTF-8` |
+| Configure network | leave **off**: `eth0` must take DHCP from your router, and PisoWiFi configures the customer LAN itself |
+| Remote config URL | leave empty |
+| SSH key URLs | optional; a key is nicer than a password if you have one on GitHub |
+
+> That file stores the passwords **in plain text**. `seal.sh` deletes it, so
+> master images never carry them — but until you seal, treat the card as
+> holding your root password in the clear.
+
+**On Debian 13 / Trixie:** it should install and run, but coin counting is the
+risk. `OPi.GPIO` uses the deprecated sysfs GPIO interface (see the note in
+[app/coinslot.py](app/coinslot.py)), which newer kernels may not expose. Verify
+with **Admin → Diagnostics → coin pulse monitor** before trusting a machine with
+real coins; Bookworm is the known-good option.
 
 ## 4. Install this software
 
@@ -307,22 +343,60 @@ to end and reaches the box through CGNAT.
 | Clients get IP but no portal | NetworkManager fighting for the LAN interface — installer writes an unmanaged rule; verify with `nmcli device`. |
 | Wrong pesos counted | Re-train acceptor; increase `pulse_end_gap_s` if a ₱5 counts as five ₱1 coins. |
 
-## 8. Rolling out more machines
+## 8. Rolling out more machines (plug-and-play cards)
 
-Two ways, fastest first:
+Machine #1 is the only one that needs an install. After that you seal it into a
+master image, and every card written from that image is **insert-and-go**: no
+SSH, no config file, no installer.
 
-1. **Clone the golden SD card.** Once machine #1 is fully working, power it off,
-   put its SD card in the PC and read it to an image (USBImager → *Read*), then
-   write that image to a new card. The clone is identical — change the admin
-   password per site if you want, and note each board gets its own MAC/IP
-   automatically. This includes the OS, all configs, and the software.
-2. **Fresh install per board.** Flash plain Armbian, boot it, install your SSH
-   key (deploy.ps1 header comment), then `.\deploy.ps1 -Target <new-board-ip>`.
-   ~10 minutes per machine, always uses your latest software version.
+**Build the master, once:**
 
-Per-machine settings live only in `/etc/pisowifi/config.json` (name, rates,
-admin password) and are preserved on re-deploys, so pushing software updates to
-a fleet is just running deploy.ps1 against each machine's IP again.
+1. Get machine #1 fully working (sections 3–5).
+2. Seal it — from the deployer's Network Deploy tab press **Seal for imaging…**,
+   or on the board run:
+
+   ```bash
+   bash /root/pisowifi/seal.sh --yes
+   ```
+
+   This wipes everything that makes it *that* box — sales database, admin
+   password, SSH host keys, machine-id, logs, and the rendered network
+   configs — then powers off. Your rates, hotspot name, branding and feature
+   toggles are kept. Add `--zero` to make the image compress much smaller.
+3. Pull the card and read it to an image: deployer → **SD Card → READ / CLONE**
+   (or USBImager → *Read*). That `.img` is your master.
+
+**Every machine after that:**
+
+Write the master to a card, put it in a board, power on. On first boot the card
+gives itself a fresh machine-id, SSH host keys and a unique hostname
+(`pisowifi-xxxxxx`), and on *every* boot it re-detects its own hardware. Connect
+a phone to the hotspot, open the portal, go to **Admin**, log in with `changeme`
+— it immediately forces you to set a real password and offers to whitelist the
+phone you are holding. Rates and the hotspot name are on the same admin pages.
+
+> Do that first-login step before the machine faces customers. Until it is done
+> the box is on the shipped password, and the setup page is deliberately
+> reachable from the customer LAN so you can reach it from a phone.
+
+**Why a clone works on different hardware now.** Nothing board-specific is
+written to the card. [`network/detect.sh`](network/detect.sh) runs at every boot
+(`pisowifi-detect.service`) and picks the interfaces from what is physically
+present — onboard NIC = internet uplink, USB-ethernet dongle = customer LAN,
+WiFi adapter = LAN with hostapd — then regenerates `nftables.conf`, the dnsmasq
+config, `hostapd.conf` and the LAN address to match. A different dongle with a
+different MAC just works. To see what it would choose without changing
+anything:
+
+```bash
+pisowifi-detect.sh --dry-run
+```
+
+Pin the interfaces by hand instead with `install.sh --lan eth1 --wan eth0`, or
+by setting `"auto_detect_interfaces": false` in the config.
+
+**Pushing software updates to a fleet** is still `.\deploy.ps1 -Target <ip>` per
+machine; `/etc/pisowifi/config.json` is preserved across re-deploys.
 
 ## 9. Legal / business notes
 

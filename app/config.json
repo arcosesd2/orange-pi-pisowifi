@@ -1,5 +1,8 @@
 {
   "hotspot_name": "AJ PisoWiFi",
+
+  "_comment_interfaces": "lan_if/wan_if are rewritten at every boot by pisowifi-detect while auto_detect_interfaces is true; set it false to pin them.",
+  "auto_detect_interfaces": true,
   "lan_if": "eth1",
   "wan_if": "eth0",
   "lan_vlan": 0,

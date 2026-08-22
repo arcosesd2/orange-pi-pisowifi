@@ -47,7 +47,11 @@ DEFAULTS = {
     "portal_port": 8080,
     "db_path": "/var/lib/pisowifi/pisowifi.db",
 
-    # interfaces / VLAN
+    # interfaces / VLAN. While auto_detect_interfaces is true, lan_if and
+    # wan_if are re-derived from the hardware present and rewritten into
+    # config.json on every boot (pisowifi-detect), which is what lets one
+    # SD card image run on any board. Set it false to pin them by hand.
+    "auto_detect_interfaces": True,
     # Default topology: eth0 = internet uplink (onboard), eth1 = antenna/LAN
     # (USB-ethernet). Set lan_if to wlan0 only for the Pi-broadcasts-its-own-WiFi
     # (hostapd) topology.

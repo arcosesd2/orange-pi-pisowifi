@@ -1,0 +1,17 @@
+[Unit]
+Description=PisoWiFi first-boot personalisation (machine-id, SSH host keys, hostname)
+DefaultDependencies=no
+After=local-fs.target systemd-remount-fs.service
+Before=pisowifi-detect.service network-pre.target sysinit.target
+Wants=local-fs.target
+# Written by the script itself once it has run; a sealed card image ships
+# without it, so the very first boot on a new board personalises the machine.
+ConditionPathExists=!/var/lib/pisowifi/.provisioned
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pisowifi-firstboot.sh
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,20 @@
+[Unit]
+Description=PisoWiFi interface detection and network config rendering
+# Runs on every boot, before anything that reads a rendered config. This is
+# what lets one SD card image work on any board: nftables.conf, the dnsmasq
+# config, hostapd.conf and the LAN address are all generated here from the
+# hardware actually present, instead of being baked in at install time.
+After=network-pre.target pisowifi-firstboot.service
+Wants=network-pre.target
+Before=nftables.service dnsmasq.service hostapd.service pisowifi.service pisowifi-tune.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/pisowifi-detect.sh
+# A board with no LAN adapter plugged in still boots; the script logs what is
+# missing rather than failing the unit and dragging the app down with it.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

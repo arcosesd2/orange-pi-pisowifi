@@ -3,7 +3,7 @@
 #   pip install -r requirements.txt      # once
 #   .\build.ps1                          # produces dist\PisoWiFi-Deployer.exe
 #
-# The whole PisoWiFi project (app/, network/, systemd/, install.sh, server/)
+# The whole PisoWiFi project (app/, network/, systemd/, install.sh, seal.sh, server/)
 # is bundled inside the exe as "payload/", so the exe is fully self-contained.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
@@ -17,6 +17,7 @@ $addData = @(
   "$proj\systemd${sep}payload\systemd",
   "$proj\server${sep}payload\server",
   "$proj\install.sh${sep}payload",
+  "$proj\seal.sh${sep}payload",
   "$proj\README.md${sep}payload"
 )
 

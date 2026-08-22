@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 # PisoWiFi installer — run as root on Armbian/Debian on the target board.
 #
-#   bash install.sh                          # auto-detect, confirm if interactive
-#   bash install.sh --yes                    # non-interactive, accept detected plan
-#   bash install.sh --wired                  # eth0 = internet, eth1 = antenna (no hostapd)
-#   bash install.sh --lan eth1 --wan eth0 --gw 10.0.0.1 --hostapd 1
-#   bash install.sh --wan eth0 --lan eth0 --vlan 5   # customer traffic on VLAN 5
+#   bash install.sh                          # install; hardware detected at boot
+#   bash install.sh --yes                    # non-interactive
+#   bash install.sh --gw 10.0.0.1            # different client subnet
+#   bash install.sh --lan eth1 --wan eth0    # pin the interfaces by hand
+#   bash install.sh --vlan 5                 # customer traffic on VLAN 5
 #
-# Auto-detection: WAN = interface holding the default route; LAN = the first
-# other wired interface (USB-ethernet), else a wlan* (hostapd is then enabled).
-# --wired  = the standard vendo layout: onboard eth0 is the internet uplink and a
-#            USB-ethernet dongle (pinned to eth1) feeds the antenna; hostapd off.
-#            The dongle is renamed to eth1 now AND pinned by MAC so it stays eth1
-#            across reboots (Armbian otherwise names it enx<mac>).
-# --vlan <id> tags the LAN onto <lan_if>.<id> to pair with a VLAN AP/antenna.
-# Safe to re-run — existing /etc/pisowifi/config.json is preserved.
+# The installer no longer decides which NIC is which. That happens on EVERY
+# boot, in pisowifi-detect.service (network/detect.sh): the onboard NIC becomes
+# the internet uplink, a USB-ethernet dongle becomes the customer LAN, and a
+# WiFi adapter becomes the LAN (with hostapd) when there is no dongle. Nothing
+# board-specific is written to disk, so the finished SD card can be cloned onto
+# any number of machines and each one comes up correctly — see seal.sh.
+#
+# Passing --lan/--wan turns auto-detection off and pins those names instead.
+# Safe to re-run — an existing /etc/pisowifi/config.json is preserved.
 set -euo pipefail
 
-LAN_IF=""; WAN_IF=""; GW_IP="10.0.0.1"; USE_HOSTAPD=""; ASSUME_YES=0; LAN_VLAN=""; WIRED=0
+LAN_IF=""; WAN_IF=""; GW_IP="10.0.0.1"; USE_HOSTAPD=""; ASSUME_YES=0; LAN_VLAN=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -26,7 +27,7 @@ while [ $# -gt 0 ]; do
         --gw)      GW_IP="$2";       shift 2 ;;
         --vlan)    LAN_VLAN="$2";    shift 2 ;;
         --hostapd) USE_HOSTAPD="$2"; shift 2 ;;
-        --wired)   WIRED=1;          shift ;;
+        --wired)   USE_HOSTAPD=0;    shift ;;   # kept for compatibility
         --yes|-y)  ASSUME_YES=1;     shift ;;
         *) echo "unknown option: $1"; exit 1 ;;
     esac
@@ -35,92 +36,40 @@ done
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 SRC="$(cd "$(dirname "$0")" && pwd)"
 
-# Pin the USB-ethernet LAN NIC to a stable "eth1": rename it live and persist the
-# name by MAC via udev, so the antenna port is always eth1 across reboots.
-ensure_eth1() {
-    local cand mac
-    if ip link show eth1 >/dev/null 2>&1; then
-        cand=eth1
-    else
-        cand=""
-        for i in $(ip -o link show | awk -F': ' '{print $2}' | cut -d@ -f1); do
-            case "$i" in lo|"$WAN_IF"|docker*|veth*|br-*|wlan*) continue ;; esac
-            cand="$i"; break
-        done
-    fi
-    if [ -z "$cand" ]; then
-        echo "  WARNING: no USB-ethernet NIC found to become eth1 — plug the antenna dongle in (or pass --lan)."
-        LAN_IF="eth1"; return
-    fi
-    mac="$(cat "/sys/class/net/$cand/address" 2>/dev/null || true)"
-    if [ -n "$mac" ]; then
-        printf 'SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="%s", NAME="eth1"\n' "$mac" \
-            > /etc/udev/rules.d/70-pisowifi-lan.rules
-        echo "  pinned $cand ($mac) -> eth1 (udev)"
-    fi
-    if [ "$cand" != eth1 ]; then
-        ip link set "$cand" down 2>/dev/null || true
-        ip link set "$cand" name eth1 2>/dev/null || true
-        ip link set eth1 up 2>/dev/null || true
-    fi
-    LAN_IF="eth1"
-}
-
-# ---------- detect interfaces ----------
-if [ -z "$WAN_IF" ]; then
-    WAN_IF="$(ip -o route show default | awk '{print $5; exit}')"
+AUTO=1
+if [ -n "$LAN_IF" ] || [ -n "$WAN_IF" ]; then
+    AUTO=0
+    [ -n "$LAN_IF" ] && [ -n "$WAN_IF" ] || {
+        echo "ERROR: pass both --lan and --wan to pin the interfaces, or neither."
+        exit 1
+    }
 fi
-# --wired: onboard eth0 = internet uplink, USB dongle (eth1) = antenna, no hostapd.
-if [ "$WIRED" = 1 ]; then
-    [ -n "$WAN_IF" ] || WAN_IF="eth0"
-    USE_HOSTAPD=0
-    echo "==> Wired vendo layout: WAN=$WAN_IF, LAN=eth1 (antenna)"
-    ensure_eth1
-fi
-[ -n "$WAN_IF" ] || { echo "ERROR: no default route — plug in the uplink or pass --wan"; exit 1; }
-
-if [ -z "$LAN_IF" ]; then
-    WLAN_CAND=""
-    for i in $(ip -o link show | awk -F': ' '{print $2}' | cut -d@ -f1); do
-        case "$i" in lo|"$WAN_IF"|docker*|veth*|br-*) continue ;; esac
-        case "$i" in
-            wlan*) WLAN_CAND="$i" ;;
-            *)     LAN_IF="$i"; break ;;
-        esac
-    done
-    [ -z "$LAN_IF" ] && LAN_IF="$WLAN_CAND"
-fi
-[ -n "$LAN_IF" ] || { echo "ERROR: no LAN interface found — plug in USB ethernet/WiFi or pass --lan"; exit 1; }
-
-if [ -z "$USE_HOSTAPD" ]; then
-    case "$LAN_IF" in wlan*) USE_HOSTAPD=1 ;; *) USE_HOSTAPD=0 ;; esac
-fi
-
-# VLAN: default from config.json if not passed; 0/empty = off.
-if [ -z "$LAN_VLAN" ]; then
-    LAN_VLAN="$(python3 -c "import json;print(json.load(open('$SRC/app/config.json')).get('lan_vlan') or '')" 2>/dev/null || true)"
-fi
-[ "$LAN_VLAN" = "0" ] && LAN_VLAN=""
-LAN_DEV="$LAN_IF"; [ -n "$LAN_VLAN" ] && LAN_DEV="$LAN_IF.$LAN_VLAN"
-CLIENT_NET="${GW_IP%.*}.0/24"
+[ -z "$LAN_VLAN" ] && LAN_VLAN=0
+[ "$LAN_VLAN" = "" ] && LAN_VLAN=0
 
 echo "PisoWiFi install plan:"
-echo "  WAN (internet uplink) : $WAN_IF"
-echo "  LAN (customers)       : $LAN_DEV${LAN_VLAN:+  (VLAN $LAN_VLAN on $LAN_IF)}"
-echo "  Client subnet         : $CLIENT_NET"
-echo "  Gateway IP            : $GW_IP"
-echo "  hostapd (own radio)   : $USE_HOSTAPD"
+if [ "$AUTO" = 1 ]; then
+    echo "  Interfaces      : detected at every boot (portable card image)"
+else
+    echo "  Interfaces      : pinned — WAN=$WAN_IF LAN=$LAN_IF"
+fi
+echo "  Gateway IP      : $GW_IP"
+echo "  Client subnet   : ${GW_IP%.*}.0/24"
+[ "$LAN_VLAN" != 0 ] && echo "  LAN VLAN        : $LAN_VLAN"
 if [ "$ASSUME_YES" != 1 ] && [ -t 0 ]; then
     read -r -p "Proceed? [y/N] " a
     case "$a" in y|Y) ;; *) echo "aborted"; exit 1 ;; esac
 fi
 
 # ---------- packages ----------
+# hostapd, pppoe and ppp go on unconditionally even though most machines never
+# use them. They are small, and it means the finished card can be moved to a
+# WiFi-radio board, or have PPPoE switched on from the admin UI, without anyone
+# needing to SSH in and apt-get anything.
 echo "==> Installing packages"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    dnsmasq nftables python3-flask python3-pip iproute2 \
-    $( [ "$USE_HOSTAPD" = 1 ] && echo hostapd )
+    dnsmasq nftables python3-flask python3-pip iproute2 hostapd pppoe ppp
 pip3 install --break-system-packages OPi.GPIO 2>/dev/null || pip3 install OPi.GPIO
 pip3 install --break-system-packages waitress 2>/dev/null || pip3 install waitress || {
     echo "  !! WARNING: waitress did NOT install."
@@ -137,6 +86,13 @@ cp -r "$SRC/app/." /opt/pisowifi/
 # SECRET_KEY, and the .pyc files were built for the PC's Python, not the board's.
 rm -rf /opt/pisowifi/__pycache__ /opt/pisowifi/dev.db
 [ -f /etc/pisowifi/config.json ] || cp "$SRC/app/config.json" /etc/pisowifi/config.json
+
+# The network templates live with the app so the boot-time renderer can find
+# them on a machine nobody ever copied the source tree to.
+echo "==> Installing network templates to /opt/pisowifi/net"
+mkdir -p /opt/pisowifi/net
+install -m 0644 "$SRC/network/nftables.conf" "$SRC/network/dnsmasq.conf" \
+    "$SRC/network/hostapd.conf" /opt/pisowifi/net/
 
 # The config holds the admin password (until first login) and the remote
 # dashboard key; the database holds PPPoE passwords in the clear, because CHAP
@@ -159,52 +115,88 @@ PY
     chmod 600 /etc/pisowifi/config.json
 fi
 
-# Keep the app's view of the interfaces in sync with what we wire below, so
-# per-client QoS (shaper) and lan_vlan resolve to the same device as nftables.
-python3 - "$LAN_IF" "$WAN_IF" "$GW_IP" "${LAN_VLAN:-0}" <<'PY'
+# Record the operator's choices. Everything else (which NIC is which) is left
+# for the boot-time detector to fill in.
+python3 - "$AUTO" "$GW_IP" "$LAN_VLAN" "$LAN_IF" "$WAN_IF" "${USE_HOSTAPD:-}" <<'PY'
 import json, sys
+auto, gw, vlan, lan, wan, hostapd = sys.argv[1:7]
 p = "/etc/pisowifi/config.json"
 c = json.load(open(p))
-c["lan_if"], c["wan_if"], c["gateway_ip"] = sys.argv[1], sys.argv[2], sys.argv[3]
-c["lan_vlan"] = int(sys.argv[4] or 0)
+c["auto_detect_interfaces"] = (auto == "1")
+c["gateway_ip"] = gw
+c["lan_vlan"] = int(vlan or 0)
+if auto != "1":
+    c["lan_if"], c["wan_if"] = lan, wan
 json.dump(c, open(p, "w"), indent=2)
 PY
+chmod 600 /etc/pisowifi/config.json
 
-# ---------- network configs ----------
-echo "==> Network configs (LAN=$LAN_DEV WAN=$WAN_IF)"
-# nftables is rendered in python: interface/net substitution + fill the
-# anti-tether / flow-offload tokens from the config toggles.
-python3 - "$SRC/network/nftables.conf" "$LAN_DEV" "$WAN_IF" "$CLIENT_NET" /etc/pisowifi/config.json \
-    > /etc/nftables.conf <<'PY'
-import json, sys
-tmpl, lan, wan, net, cfgp = sys.argv[1:6]
-cfg = json.load(open(cfgp))
-s = open(tmpl).read()
-# WAN before LAN so "eth0" inside a VLAN LAN like "eth0.5" isn't rewritten
-s = s.replace("eth0", wan).replace("wlan0", lan).replace("10.0.0.0/24", net)
-anti = ""
-if cfg.get("anti_tether"):
-    anti = ("    chain mangle_post {\n"
-            "        type filter hook postrouting priority mangle; policy accept;\n"
-            f"        oifname {lan} ip ttl set 1\n"
-            f"        oifname {lan} ip6 hoplimit set 1\n"
-            "    }")
-flowt = offl = ""
-if cfg.get("flow_offload"):
-    flowt = ("    flowtable ft {\n"
-             "        hook ingress priority filter\n"
-             f"        devices = {{ {lan}, {wan} }}\n"
-             "    }")
-    offl = "        ip protocol { tcp, udp } flow add @ft"
-s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt).replace("#@OFFLOAD@", offl)
-sys.stdout.write(s)
-PY
-sed -e "s#eth0#$WAN_IF#g" -e "s#wlan0#$LAN_DEV#g" -e "s#10\.0\.0\.#${GW_IP%.*}.#g" \
-    "$SRC/network/dnsmasq.conf" > /etc/dnsmasq.d/pisowifi.conf
-if [ "$USE_HOSTAPD" = 1 ]; then
-    sed -e "s/wlan0/$LAN_IF/g" "$SRC/network/hostapd.conf" > /etc/hostapd/hostapd.conf
-    sed -i 's|^#\?DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd || true
+# ---------- boot-time provisioning ----------
+echo "==> Boot-time provisioning scripts"
+install -m 0755 "$SRC/network/detect.sh"    /usr/local/sbin/pisowifi-detect.sh
+install -m 0755 "$SRC/network/firstboot.sh" /usr/local/sbin/pisowifi-firstboot.sh
+install -m 0755 "$SRC/network/tune.sh"      /usr/local/sbin/pisowifi-tune.sh
+
+# Superseded by pisowifi-detect.service. Left in place it would re-apply the
+# interface names of whichever board the installer last ran on, which is the
+# whole problem the detector exists to solve.
+if [ -e /etc/systemd/system/pisowifi-net.service ]; then
+    echo "==> Removing the old pisowifi-net.service (replaced by pisowifi-detect)"
+    systemctl disable --now pisowifi-net.service 2>/dev/null || true
+    rm -f /etc/systemd/system/pisowifi-net.service
 fi
+rm -f /etc/udev/rules.d/70-pisowifi-lan.rules   # old MAC pin — see detect.sh
+
+install -m 0644 "$SRC/systemd/pisowifi.service"           /etc/systemd/system/pisowifi.service
+install -m 0644 "$SRC/systemd/pisowifi-detect.service"    /etc/systemd/system/pisowifi-detect.service
+install -m 0644 "$SRC/systemd/pisowifi-firstboot.service" /etc/systemd/system/pisowifi-firstboot.service
+
+cat > /etc/systemd/system/pisowifi-tune.service <<'EOF'
+[Unit]
+Description=PisoWiFi runtime tuning (RPS/conntrack/governor)
+After=pisowifi-detect.service network.target
+Wants=pisowifi-detect.service
+ConditionPathExists=/run/pisowifi/env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '. /run/pisowifi/env; exec /usr/local/sbin/pisowifi-tune.sh "$WAN_IF" "$LAN_IF" "$LAN_DEV"'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# hostapd is installed on every machine but must only actually start on the
+# ones serving their own WiFi. The detector drops this flag file when the LAN
+# it found is a wireless adapter.
+mkdir -p /etc/systemd/system/hostapd.service.d
+cat > /etc/systemd/system/hostapd.service.d/99-pisowifi.conf <<'EOF'
+[Unit]
+After=pisowifi-detect.service
+Wants=pisowifi-detect.service
+ConditionPathExists=/run/pisowifi/hostapd.needed
+EOF
+
+# ---------- optional: PPPoE access concentrator (monthly subscribers) -------
+# Enabled/disabled purely by the `pppoe_enabled` toggle in the admin UI; the
+# detector drops the flag file this unit waits on.
+touch /etc/ppp/chap-secrets && chmod 600 /etc/ppp/chap-secrets
+cat > /etc/systemd/system/pppoe-server.service <<'EOF'
+[Unit]
+Description=PisoWiFi PPPoE access concentrator
+After=pisowifi-detect.service network.target
+Wants=pisowifi-detect.service
+ConditionPathExists=/run/pisowifi/pppoe.needed
+
+[Service]
+ExecStart=/bin/sh -c '. /run/pisowifi/env; exec /usr/sbin/pppoe-server -F -I "$LAN_DEV" -L 12.0.0.1 -R 12.0.0.2 -N 254 -O /etc/ppp/pppoe-server-options'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 echo "==> IP forwarding + network tuning (sysctl)"
 cat > /etc/sysctl.d/99-pisowifi.conf <<'EOF'
@@ -232,99 +224,33 @@ RuntimeMaxUse=16M
 EOF
 systemctl restart systemd-journald 2>/dev/null || true
 
-echo "==> Runtime tuning unit (packet steering / conntrack / CPU governor)"
-install -m 0755 "$SRC/network/tune.sh" /usr/local/sbin/pisowifi-tune.sh
-cat > /etc/systemd/system/pisowifi-tune.service <<EOF
-[Unit]
-Description=PisoWiFi runtime tuning (RPS/conntrack/governor)
-After=pisowifi-net.service network.target
-Wants=pisowifi-net.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/sbin/pisowifi-tune.sh $WAN_IF $LAN_IF $LAN_DEV
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-echo "==> Keep NetworkManager off the LAN interface"
-if command -v nmcli >/dev/null 2>&1; then
-    mkdir -p /etc/NetworkManager/conf.d
-    printf '[keyfile]\nunmanaged-devices=interface-name:%s;interface-name:%s\n' "$LAN_IF" "$LAN_DEV" \
-        > /etc/NetworkManager/conf.d/99-pisowifi.conf
-    systemctl reload NetworkManager || true
-fi
-
-echo "==> LAN address unit (pisowifi-net.service)"
-VLAN_LINE=""
-[ -n "$LAN_VLAN" ] && VLAN_LINE="ExecStart=-/sbin/ip link add link $LAN_IF name $LAN_DEV type vlan id $LAN_VLAN"
-cat > /etc/systemd/system/pisowifi-net.service <<EOF
-[Unit]
-Description=PisoWiFi LAN interface address
-Before=dnsmasq.service hostapd.service pisowifi.service
-After=network.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=-/sbin/ip link set $LAN_IF up
-$VLAN_LINE
-ExecStart=-/sbin/ip link set $LAN_DEV up
-ExecStart=-/sbin/ip addr replace $GW_IP/24 dev $LAN_DEV
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# ---------- optional: PPPoE access concentrator (monthly subscribers) ----------
-PPPOE_EN="$(python3 -c "import json;print(1 if json.load(open('/etc/pisowifi/config.json')).get('pppoe_enabled') else 0)" 2>/dev/null || echo 0)"
-if [ "$PPPOE_EN" = "1" ]; then
-    echo "==> PPPoE access concentrator (pppoe-server on $LAN_DEV)"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y pppoe ppp || true
-    cat > /etc/ppp/pppoe-server-options <<'EOF'
-require-chap
-ms-dns 10.0.0.1
-lcp-echo-interval 10
-lcp-echo-failure 2
-mtu 1492
-noaccomp
-default-asyncmap
-EOF
-    touch /etc/ppp/chap-secrets && chmod 600 /etc/ppp/chap-secrets
-    cat > /etc/systemd/system/pppoe-server.service <<EOF
-[Unit]
-Description=PisoWiFi PPPoE access concentrator
-After=pisowifi-net.service network.target
-Wants=pisowifi-net.service
-
-[Service]
-ExecStart=/usr/sbin/pppoe-server -F -I $LAN_DEV -L 12.0.0.1 -R 12.0.0.2 -N 254 -O /etc/ppp/pppoe-server-options
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl enable pppoe-server || true
-fi
-
-cp "$SRC/systemd/pisowifi.service" /etc/systemd/system/pisowifi.service
 systemctl daemon-reload
 
+# ---------- provision this board now, so the install works without a reboot --
+echo "==> Detecting interfaces and rendering network configs"
+/usr/local/sbin/pisowifi-firstboot.sh || true
+/usr/local/sbin/pisowifi-detect.sh
+# shellcheck disable=SC1091
+[ -f /run/pisowifi/env ] && . /run/pisowifi/env
+
 echo "==> Enabling services"
-systemctl enable --now nftables pisowifi-net pisowifi-tune
-if [ "$USE_HOSTAPD" = 1 ]; then
-    systemctl unmask hostapd
-    systemctl enable --now hostapd
-fi
-systemctl enable --now dnsmasq pisowifi
-systemctl restart pisowifi-net nftables dnsmasq pisowifi
-[ "$PPPOE_EN" = "1" ] && systemctl restart pppoe-server 2>/dev/null || true
+systemctl unmask hostapd 2>/dev/null || true
+systemctl enable pisowifi-firstboot pisowifi-detect pisowifi-tune hostapd pppoe-server \
+    >/dev/null 2>&1 || true
+systemctl enable nftables dnsmasq pisowifi >/dev/null 2>&1 || true
+systemctl restart pisowifi-detect pisowifi-tune nftables dnsmasq pisowifi
+# Condition-gated: these no-op on machines that do not need them.
+systemctl restart hostapd 2>/dev/null || true
+systemctl restart pppoe-server 2>/dev/null || true
 
 echo
-echo "DONE. Portal: http://$GW_IP:8080   Admin: http://$GW_IP:8080/admin"
+if [ -f /run/pisowifi/env ]; then
+    echo "DONE. WAN=${WAN_IF:-?}  LAN=${LAN_DEV:-?}  hostapd=${USE_HOSTAPD:-0}"
+else
+    echo "DONE — but no LAN adapter was found. Plug in the antenna's USB-ethernet"
+    echo "dongle (or a WiFi adapter) and reboot; it is picked up automatically."
+fi
+echo "Portal: http://$GW_IP:8080   Admin: http://$GW_IP:8080/admin"
 if [ -n "$ADMIN_PW" ]; then
     echo
     echo "  =============================================================="
@@ -332,7 +258,7 @@ if [ -n "$ADMIN_PW" ]; then
     echo "      $ADMIN_PW"
     echo "  =============================================================="
     echo "  Write this down now. It is also in /etc/pisowifi/config.json"
-    echo "  (root-only) if you lose it."
+    echo "  (root-only) if you lose it. The first login makes you replace it."
 else
     echo "  (kept the existing /etc/pisowifi/config.json — password unchanged)"
 fi
@@ -344,4 +270,5 @@ echo "  first device (Admin -> Devices). After that only whitelisted devices, th
 echo "  machine itself, or a private path such as Tailscale can open it."
 echo "  Whitelist your own phone first, or you will lock yourself out."
 echo
-echo "Edit /etc/pisowifi/config.json (rates, name), then: systemctl restart pisowifi"
+echo "Rates, hotspot name and password are all editable from Admin in a browser."
+echo "To turn this machine into a master card image for others: bash seal.sh --yes"

@@ -34,7 +34,8 @@ APP_TITLE = "PisoWiFi Deployer"
 APP_VERSION = "1.0"
 
 # Project files uploaded to a board (relative to the payload root).
-PAYLOAD_ITEMS = ["app", "network", "systemd", "install.sh", "README.md", "server"]
+PAYLOAD_ITEMS = ["app", "network", "systemd", "install.sh", "seal.sh",
+                 "README.md", "server"]
 TEXT_EXT = {".py", ".html", ".conf", ".json", ".service", ".sh", ".md", ".cfg", ".txt"}
 
 
@@ -726,7 +727,7 @@ def launch_gui():
                 dep.push_config("/etc/pisowifi/config.json", cfg)
                 dep.run("systemctl restart pisowifi", echo=False)
             log("Verifying services…")
-            dep.run("systemctl is-active pisowifi pisowifi-net nftables dnsmasq "
+            dep.run("systemctl is-active pisowifi pisowifi-detect nftables dnsmasq "
                     "| tr '\\n' ' '; echo")
             # retry: Flask needs a moment to rebind the port after the restart
             dep.run("for i in $(seq 1 10); do "
@@ -740,10 +741,51 @@ def launch_gui():
             log(f"Portal http://{ip}:8080/   Admin http://{ip}:8080/admin")
         worker(run)
 
+    def do_seal():
+        """Turn a finished machine into a master image.
+
+        Everything that makes the box *this* box is removed, so cards written
+        from the resulting image boot ready to use on any board with no SSH:
+        each one re-detects its own hardware at boot and asks for an admin
+        password through the portal."""
+        ip = selected_ip()
+        if not ip:
+            return
+        if not messagebox.askyesno(
+                APP_TITLE,
+                f"Seal {ip} for imaging?\n\n"
+                "This WIPES the sales database, admin password, SSH host keys "
+                "and logs on that machine, then powers it off.\n\n"
+                "Do this only on a machine you are turning into a master card. "
+                "Afterwards: pull its SD card and read it with the SD Card tab.",
+                icon="warning"):
+            return
+
+        def run():
+            set_progress(0)
+            log("=" * 60)
+            dep = Deployer(log)
+            set_status(f"Connecting to {ip}…")
+            dep.connect(ip, ssh_user.get().strip(), ssh_pass.get() or None)
+            log("Sealing — the board powers itself off when this finishes.")
+            # The board cuts the connection mid-command by design, so a
+            # non-zero status here is expected and not an error.
+            try:
+                dep.run("cd /root/pisowifi && bash seal.sh --yes")
+            except Exception as e:
+                log(f"(connection closed during poweroff: {e})")
+            dep.close()
+            set_progress(1.0)
+            set_status("Sealed. Pull the card and read it on the SD Card tab.")
+            log("SEALED. Next: power off, pull the SD card, then")
+            log("SD Card tab -> READ / CLONE to save it as your master .img.")
+        worker(run)
+
     btns = ttk.Frame(t1); btns.pack(fill="x", pady=6)
     ttk.Button(btns, text="Identify board", command=do_identify).pack(side="left", padx=4)
     ttk.Button(btns, text="Deploy PisoWiFi ▶", style="Accent.TButton",
                command=do_deploy).pack(side="left", padx=4)
+    ttk.Button(btns, text="Seal for imaging…", command=do_seal).pack(side="left", padx=16)
 
     # =====================================================================
     # TAB 2 — SD Card

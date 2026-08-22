@@ -74,6 +74,40 @@ case "$CURRENT" in
         ;;
 esac
 
+# ---------------------------------------------------------------------------
+# grow the filesystem to fill this card
+# ---------------------------------------------------------------------------
+# Armbian's own resize is a one-shot that already fired on the master, and it
+# disarms itself — so every card written from a master image would otherwise
+# stay frozen at the master's partition size, wasting the rest of the card. Do
+# it ourselves rather than trying to re-arm Armbian's flag, whose path moves
+# between releases.
+ROOT_SRC="$(findmnt -no SOURCE / 2>/dev/null || true)"
+case "$ROOT_SRC" in
+    /dev/mmcblk*p[0-9]*|/dev/sd[a-z][0-9]*|/dev/nvme*p[0-9]*)
+        PART_NUM="${ROOT_SRC##*[a-z]}"
+        DISK="${ROOT_SRC%"$PART_NUM"}"
+        DISK="${DISK%p}"
+        BEFORE="$(df -k --output=size / 2>/dev/null | tail -1 | tr -d ' ')"
+        if command -v growpart >/dev/null 2>&1; then
+            growpart "$DISK" "$PART_NUM" >/dev/null 2>&1 || true
+            partprobe "$DISK" >/dev/null 2>&1 || true
+        else
+            log "growpart not installed (cloud-guest-utils) — skipping partition grow"
+        fi
+        resize2fs "$ROOT_SRC" >/dev/null 2>&1 || true
+        AFTER="$(df -k --output=size / 2>/dev/null | tail -1 | tr -d ' ')"
+        if [ -n "$BEFORE" ] && [ -n "$AFTER" ] && [ "$AFTER" -gt "$BEFORE" ] 2>/dev/null; then
+            log "rootfs grown: $((BEFORE / 1024)) MB -> $((AFTER / 1024)) MB"
+        else
+            log "rootfs already fills the card ($((${AFTER:-0} / 1024)) MB)"
+        fi
+        ;;
+    *)
+        log "root is on '$ROOT_SRC' — not a whole-card partition, skipping resize"
+        ;;
+esac
+
 touch "$MARK"
 log "done"
 exit 0

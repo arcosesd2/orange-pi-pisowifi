@@ -33,6 +33,22 @@
 <body>
   {% if brand.banner %}<img class="banner" src="/branding/{{ brand.banner }}" alt="">{% endif %}
   <h1>{% if brand.logo %}<img src="/branding/{{ brand.logo }}" alt="" style="height:1.3em;vertical-align:middle;margin-right:6px">{% else %}📶 {% endif %}{{ name }}</h1>
+  {% if unconfigured %}
+  <!-- Only on a machine that has never had its admin password set. A card
+       straight off a master image has no other way to tell its owner where
+       to go: the captive portal opens by itself, but /admin is an address you
+       would otherwise have to already know. Disappears the moment a password
+       is set, so customers never see an admin link on a working machine. -->
+  <div class="card" style="border:1px solid var(--accent)">
+    <div class="muted">SETUP NOT FINISHED</div>
+    <p style="font-size:.85rem;margin:8px 0 12px">
+      This machine is still on the password it shipped with. Finish setting it
+      up before it takes any coins.
+    </p>
+    <a class="big insert" href="/admin"
+       style="display:block;text-decoration:none;text-align:center">🔧 Finish setup</a>
+  </div>
+  {% endif %}
   <div id="err"></div>
 
   <!-- active time -->

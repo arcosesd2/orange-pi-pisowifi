@@ -65,11 +65,13 @@ fi
 # hostapd, pppoe and ppp go on unconditionally even though most machines never
 # use them. They are small, and it means the finished card can be moved to a
 # WiFi-radio board, or have PPPoE switched on from the admin UI, without anyone
-# needing to SSH in and apt-get anything.
+# needing to SSH in and apt-get anything. cloud-guest-utils supplies growpart,
+# which first boot uses to grow a written card's rootfs to the card's real size.
 echo "==> Installing packages"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    dnsmasq nftables python3-flask python3-pip iproute2 hostapd pppoe ppp
+    dnsmasq nftables python3-flask python3-pip iproute2 hostapd pppoe ppp \
+    cloud-guest-utils
 pip3 install --break-system-packages OPi.GPIO 2>/dev/null || pip3 install OPi.GPIO
 pip3 install --break-system-packages waitress 2>/dev/null || pip3 install waitress || {
     echo "  !! WARNING: waitress did NOT install."

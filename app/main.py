@@ -546,6 +546,10 @@ def portal():
     return render_template(
         "portal.html", name=setting("hotspot_name"), rates=rate_rows(),
         brand=setting("branding") or {},
+        # Drives the "Finish setup" banner: on a card fresh off a master image
+        # the captive portal is the only thing the owner sees, so it has to be
+        # what points them at /admin.
+        unconfigured=db.admin_password_is_default(),
         trial_enabled=setting("trial_enabled"), trial_minutes=setting("trial_minutes"),
         wallet_enabled=setting("wallet_enabled"), sse_enabled=setting("sse_enabled"),
     )

@@ -18,7 +18,12 @@ param(
     [switch]$Seal,
     [switch]$ZeroFill
 )
-$ErrorActionPreference = "Stop"
+# NOT "Stop". Windows PowerShell turns anything a native command writes to
+# stderr into an ErrorRecord, so with Stop the script dies on ssh's own warning
+# text and on every apt-get notice during the install -- neither of which is a
+# failure. Correctness comes from checking $LASTEXITCODE after each step and
+# throwing explicitly, which is what this script does throughout.
+$ErrorActionPreference = "Continue"
 
 # ---------------------------------------------------------------------------
 # Find the board if no IP was given
@@ -85,26 +90,34 @@ if (-not (Test-Path "$key.pub")) {
     ssh-keygen -t ed25519 -N '""' -f $key | Out-Null
 }
 
+function Test-KeyAuth {
+    # Returns the combined output and the real exit code, without letting ssh's
+    # stderr chatter become a PowerShell error.
+    $out = & ssh -o BatchMode=yes -o ConnectTimeout=10 `
+                 -o StrictHostKeyChecking=accept-new $dest "true" 2>&1 | Out-String
+    return [pscustomobject]@{ Output = $out; Code = $LASTEXITCODE }
+}
+
 # A freshly flashed board generates its own host keys, and DHCP hands out
 # addresses that other machines used before it -- so a "HOST IDENTIFICATION HAS
 # CHANGED" warning here is the normal case, not an attack, and it blocks the
 # connection outright (accept-new only covers unknown hosts, not changed ones).
 # Drop the stale record for this address only, and say so.
-$probe = ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $dest "true" 2>&1
-if ($probe -match "REMOTE HOST IDENTIFICATION HAS CHANGED") {
-    Warn "known_hosts has an old key for $Target (that address was used by another"
-    Warn "machine before this board). Removing just that entry."
-    ssh-keygen -R $Target 2>&1 | Out-Null
-    $probe = ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $dest "true" 2>&1
+$probe = Test-KeyAuth
+if ($probe.Output -match "REMOTE HOST IDENTIFICATION HAS CHANGED") {
+    Warn "known_hosts has an old key for $Target (that address was used by"
+    Warn "another machine before this board). Removing just that entry."
+    & ssh-keygen -R $Target 2>&1 | Out-Null
+    $probe = Test-KeyAuth
 }
-if ($LASTEXITCODE -ne 0) {
+if ($probe.Code -ne 0) {
     Say "Installing your SSH key on the board"
     Write-Host "    Type the ROOT password from your Armbian first-boot profile." -ForegroundColor Yellow
     Get-Content "$key.pub" | ssh -o StrictHostKeyChecking=accept-new $dest `
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
     if ($LASTEXITCODE -ne 0) { throw "Could not install the SSH key -- check the IP and the root password." }
-    ssh -o BatchMode=yes -o ConnectTimeout=10 $dest "true"
-    if ($LASTEXITCODE -ne 0) { throw "Key installed but key-auth still fails; is PermitRootLogin enabled?" }
+    $probe = Test-KeyAuth
+    if ($probe.Code -ne 0) { throw "Key installed but key-auth still fails; is PermitRootLogin enabled?" }
 }
 $model = (ssh $dest "cat /proc/device-tree/model 2>/dev/null | tr -d '\0'") -join ""
 Ok "connected -- $(if ($model) { $model } else { 'board model unknown' })"

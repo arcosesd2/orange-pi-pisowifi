@@ -1,4 +1,4 @@
-# PisoWiFi — build machine #1 in one command.
+# PisoWiFi -- build machine #1 in one command.
 #
 #   .\provision.ps1 -Target 192.168.1.50
 #
@@ -32,7 +32,7 @@ function Find-Board {
           Select-Object -First 1
     if (-not $me) { throw "No usable network interface found." }
     $prefix = ($me.IPAddress -split '\.')[0..2] -join '.'
-    Write-Host "==> Scanning $prefix.0/24 for boards (SSH)…" -ForegroundColor Cyan
+    Write-Host "==> Scanning $prefix.0/24 for boards (SSH)..." -ForegroundColor Cyan
 
     $gw = (Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
            ForEach-Object { $_.NextHop }) -join " "
@@ -81,12 +81,12 @@ $problems = @()
 # ---------------------------------------------------------------------------
 Say "Checking SSH access to $dest"
 if (-not (Test-Path "$key.pub")) {
-    Say "No SSH key found — generating one"
+    Say "No SSH key found -- generating one"
     ssh-keygen -t ed25519 -N '""' -f $key | Out-Null
 }
 
 # A freshly flashed board generates its own host keys, and DHCP hands out
-# addresses that other machines used before it — so a "HOST IDENTIFICATION HAS
+# addresses that other machines used before it -- so a "HOST IDENTIFICATION HAS
 # CHANGED" warning here is the normal case, not an attack, and it blocks the
 # connection outright (accept-new only covers unknown hosts, not changed ones).
 # Drop the stale record for this address only, and say so.
@@ -102,12 +102,12 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "    Type the ROOT password from your Armbian first-boot profile." -ForegroundColor Yellow
     Get-Content "$key.pub" | ssh -o StrictHostKeyChecking=accept-new $dest `
         "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-    if ($LASTEXITCODE -ne 0) { throw "Could not install the SSH key — check the IP and the root password." }
+    if ($LASTEXITCODE -ne 0) { throw "Could not install the SSH key -- check the IP and the root password." }
     ssh -o BatchMode=yes -o ConnectTimeout=10 $dest "true"
     if ($LASTEXITCODE -ne 0) { throw "Key installed but key-auth still fails; is PermitRootLogin enabled?" }
 }
 $model = (ssh $dest "cat /proc/device-tree/model 2>/dev/null | tr -d '\0'") -join ""
-Ok "connected — $(if ($model) { $model } else { 'board model unknown' })"
+Ok "connected -- $(if ($model) { $model } else { 'board model unknown' })"
 
 # ---------------------------------------------------------------------------
 # 2. Install
@@ -118,9 +118,9 @@ scp -q -r "$src\app" "$src\network" "$src\systemd" "$src\install.sh" "$src\seal.
 if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi && find /root/pisowifi -type f -exec sed -i "s/\r$//" {} +'
 
-Say "Running the installer (this pulls packages — a few minutes)"
+Say "Running the installer (this pulls packages -- a few minutes)"
 ssh $dest "cd /root/pisowifi && bash install.sh --yes"
-if ($LASTEXITCODE -ne 0) { throw "installer failed — see the output above" }
+if ($LASTEXITCODE -ne 0) { throw "installer failed -- see the output above" }
 
 # ---------------------------------------------------------------------------
 # 3. The checks that actually matter
@@ -140,17 +140,17 @@ if ($detect -match "no LAN interface found") {
 # which stalls under real client load.
 ssh $dest "python3 -c 'import waitress' 2>/dev/null"
 if ($LASTEXITCODE -ne 0) {
-    $problems += "waitress is missing — the app is on the Flask dev server, which is not fit for live use. Fix: ssh $dest 'pip3 install --break-system-packages waitress' then reboot."
+    $problems += "waitress is missing -- the app is on the Flask dev server, which is not fit for live use. Fix: ssh $dest 'pip3 install --break-system-packages waitress' then reboot."
     Bad "waitress not installed"
 } else { Ok "waitress (production server) installed" }
 
 # Coin GPIO. On newer kernels (Debian 13 / Trixie) OPi.GPIO's sysfs interface
-# may be gone, and the app falls back to mock — it looks healthy but will
+# may be gone, and the app falls back to mock -- it looks healthy but will
 # never count a coin.
 $gpio = (ssh $dest "python3 -c 'import orangepi.one, OPi.GPIO; print(\"real\")' 2>/dev/null") -join ""
 if ($gpio -ne "real") {
-    $problems += "GPIO library unavailable — coins will NOT be counted (the app runs mocked). This is the known Debian 13 risk; see the libgpiod note in app/coinslot.py."
-    Bad "OPi.GPIO not usable — coin counting will not work"
+    $problems += "GPIO library unavailable -- coins will NOT be counted (the app runs mocked). This is the known Debian 13 risk; see the libgpiod note in app/coinslot.py."
+    Bad "OPi.GPIO not usable -- coin counting will not work"
 } else { Ok "GPIO library available" }
 
 $svc = (ssh $dest "systemctl is-active pisowifi pisowifi-detect nftables dnsmasq | tr '\n' ' '") -join ""
@@ -170,7 +170,7 @@ if ($http -ne "200") {
 # ---------------------------------------------------------------------------
 Write-Host ""
 if ($problems.Count -gt 0) {
-    Write-Host "NOT READY — fix these first:" -ForegroundColor Red
+    Write-Host "NOT READY -- fix these first:" -ForegroundColor Red
     foreach ($p in $problems) { Write-Host "  * $p" -ForegroundColor Red }
     Write-Host ""
     Write-Host "Do NOT seal this card until they are resolved." -ForegroundColor Red
@@ -181,7 +181,7 @@ Write-Host "MACHINE #1 IS UP." -ForegroundColor Green
 Write-Host ""
 Write-Host "  Admin:  http://$Target`:8080/admin   (password was printed above)"
 Write-Host ""
-Write-Host "Still to do by hand — neither can be automated:"
+Write-Host "Still to do by hand -- neither can be automated:"
 Write-Host "  1. Train the coin acceptor, then verify with real coins in"
 Write-Host "     Admin -> Diagnostics -> coin pulse monitor."
 Write-Host "  2. Set the admin password, rates and hotspot name in Admin,"
@@ -204,7 +204,7 @@ if ($a -ne "SEAL") { Write-Host "aborted"; exit 1 }
 
 $sealArgs = "--yes"
 if ($ZeroFill) { $sealArgs = "--yes --zero" }
-Say "Sealing (the board cuts the connection when it powers off — that is expected)"
+Say "Sealing (the board cuts the connection when it powers off -- that is expected)"
 ssh $dest "cd /root/pisowifi && bash seal.sh $sealArgs" 2>$null
 
 Write-Host ""

@@ -1,4 +1,4 @@
-# PisoWiFi one-command deployer — provisions a fresh board over the network.
+# PisoWiFi one-command deployer -- provisions a fresh board over the network.
 #
 #   .\deploy.ps1 -Target 192.168.254.117
 #   .\deploy.ps1 -Target 192.168.1.50 -InstallArgs "--yes","--lan","eth1"
@@ -16,7 +16,7 @@ $dest = "$User@$Target"
 
 Write-Host "==> Checking SSH access to $dest"
 ssh -o BatchMode=yes -o ConnectTimeout=10 $dest "true"
-if ($LASTEXITCODE -ne 0) { throw "No key-based SSH access to $dest — install your key first (see comment at top)." }
+if ($LASTEXITCODE -ne 0) { throw "No key-based SSH access to $dest -- install your key first (see comment at top)." }
 
 Write-Host "==> Copying project"
 ssh $dest 'rm -rf /root/pisowifi.new && mkdir -p /root/pisowifi.new'
@@ -28,6 +28,6 @@ ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi && find
 
 Write-Host "==> Running installer ($($InstallArgs -join ' '))"
 ssh $dest "cd /root/pisowifi && bash install.sh $($InstallArgs -join ' ')"
-if ($LASTEXITCODE -ne 0) { throw "installer failed — see output above" }
+if ($LASTEXITCODE -ne 0) { throw "installer failed -- see output above" }
 
 Write-Host "==> Done. Portal: http://10.0.0.1:8080  Admin: http://10.0.0.1:8080/admin"

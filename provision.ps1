@@ -129,7 +129,15 @@ Say "Copying the project"
 ssh $dest 'rm -rf /root/pisowifi.new && mkdir -p /root/pisowifi.new'
 scp -q -r "$src\app" "$src\network" "$src\systemd" "$src\install.sh" "$src\seal.sh" "$src\README.md" "${dest}:/root/pisowifi.new/"
 if ($LASTEXITCODE -ne 0) { throw "scp failed" }
-ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi && find /root/pisowifi -type f -exec sed -i "s/\r$//" {} +'
+# There is deliberately NO CRLF-strip here any more. It used to read:
+#     find /root/pisowifi -type f -exec sed -i "s/\r$//" {} +
+# By the time that reached the board's sed the backslash was gone, leaving
+# s/r$// -- "delete a trailing r from every line". It rewrote "import shaper"
+# as "import shape" and damaged 7 of the 10 modules, silently: no error
+# anywhere, the app just died at import on the board.
+# .gitattributes checks this tree out as LF, so there is nothing to strip, and
+# the checksum comparison below catches it if that ever stops being true.
+ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi'
 
 Say "Running the installer (this pulls packages -- a few minutes)"
 # --wan-management keeps SSH reachable from the uplink. Without it the
@@ -143,6 +151,32 @@ if ($LASTEXITCODE -ne 0) { throw "installer failed -- see the output above" }
 # 3. The checks that actually matter
 # ---------------------------------------------------------------------------
 Say "Verifying"
+
+# Did the code that landed on the board match what left this PC? A transport
+# that quietly rewrites source is not hypothetical -- the CRLF-strip removed
+# above corrupted 7 of 10 modules, and the only symptom was a service that
+# would not start. Compare checksums so that failure can never be silent again.
+$localHashes = @{}
+Get-ChildItem "$src\app" -Filter *.py | ForEach-Object {
+    $localHashes[$_.Name] = (Get-FileHash $_.FullName -Algorithm MD5).Hash.ToLower()
+}
+$remoteRaw = ssh $dest 'md5sum /opt/pisowifi/*.py 2>/dev/null'
+$remoteHashes = @{}
+foreach ($line in $remoteRaw) {
+    if ($line -match '^([0-9a-f]{32})\s+\S*/([^/]+\.py)$') {
+        $remoteHashes[$Matches[2]] = $Matches[1]
+    }
+}
+$corrupt = @()
+foreach ($name in $localHashes.Keys) {
+    if ($remoteHashes[$name] -ne $localHashes[$name]) { $corrupt += $name }
+}
+if ($corrupt.Count -gt 0) {
+    Bad "upload does NOT match source: $($corrupt -join ', ')"
+    $problems += "These files differ from the local source after upload: $($corrupt -join ', '). The deployed code is not the code you wrote."
+} else {
+    Ok "all $($localHashes.Count) modules match the local source"
+}
 
 # Which NIC became what. Getting this backwards is the single most common way
 # a board comes up looking fine and serving nobody.
@@ -164,7 +198,11 @@ if ($LASTEXITCODE -ne 0) {
 # Coin GPIO. On newer kernels (Debian 13 / Trixie) OPi.GPIO's sysfs interface
 # may be gone, and the app falls back to mock -- it looks healthy but will
 # never count a coin.
-$gpio = (ssh $dest "python3 -c 'import orangepi.one, OPi.GPIO; print(\"real\")' 2>/dev/null") -join ""
+# Single-quoted for the same reason as the portal check: PowerShell mangles
+# escaped quotes inside a double-quoted string, and the command that reached
+# the board was malformed -- reporting GPIO broken on a board where it works.
+$gpioCmd = 'python3 -c "import orangepi.one, OPi.GPIO; print(chr(114)+chr(101)+chr(97)+chr(108))" 2>/dev/null'
+$gpio = (ssh $dest $gpioCmd) -join ""
 if ($gpio -ne "real") {
     $problems += "GPIO library unavailable -- coins will NOT be counted (the app runs mocked). This is the known Debian 13 risk; see the libgpiod note in app/coinslot.py."
     Bad "OPi.GPIO not usable -- coin counting will not work"

@@ -23,8 +23,12 @@ ssh $dest 'rm -rf /root/pisowifi.new && mkdir -p /root/pisowifi.new'
 scp -r "$src\app" "$src\network" "$src\systemd" "$src\install.sh" "$src\seal.sh" "$src\README.md" "${dest}:/root/pisowifi.new/"
 if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 
-# swap into place + strip Windows line endings
-ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi && find /root/pisowifi -type f -exec sed -i "s/\r$//" {} +'
+# Swap into place. The CRLF-strip that used to live here corrupted every file
+# it touched: the backslash in "s/\r$//" was lost before the board's sed saw
+# it, leaving s/r$// -- a trailing "r" deleted from every line, turning
+# "import shaper" into "import shape". .gitattributes checks this tree out as
+# LF, so there is nothing to strip.
+ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi'
 
 Write-Host "==> Running installer ($($InstallArgs -join ' '))"
 ssh $dest "cd /root/pisowifi && bash install.sh $($InstallArgs -join ' ')"

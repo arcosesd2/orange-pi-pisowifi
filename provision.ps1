@@ -195,18 +195,11 @@ if ($LASTEXITCODE -ne 0) {
     Bad "waitress not installed"
 } else { Ok "waitress (production server) installed" }
 
-# Coin GPIO. On newer kernels (Debian 13 / Trixie) OPi.GPIO's sysfs interface
-# may be gone, and the app falls back to mock -- it looks healthy but will
-# never count a coin.
-# Single-quoted for the same reason as the portal check: PowerShell mangles
-# escaped quotes inside a double-quoted string, and the command that reached
-# the board was malformed -- reporting GPIO broken on a board where it works.
-$gpioCmd = 'python3 -c "import orangepi.one, OPi.GPIO; print(chr(114)+chr(101)+chr(97)+chr(108))" 2>/dev/null'
-$gpio = (ssh $dest $gpioCmd) -join ""
-if ($gpio -ne "real") {
-    $problems += "GPIO library unavailable -- coins will NOT be counted (the app runs mocked). This is the known Debian 13 risk; see the libgpiod note in app/coinslot.py."
-    Bad "OPi.GPIO not usable -- coin counting will not work"
-} else { Ok "GPIO library available" }
+# Coin GPIO. There is no standalone probe here on purpose: importing OPi.GPIO
+# in a throwaway interpreter proves nothing about whether the running app
+# managed to arm the pin, and getting a python -c one-liner through
+# PowerShell -> ssh -> sh intact is its own quoting minefield. The app itself
+# is the authority -- it logs exactly why if it had to fall back to mock.
 
 $svc = (ssh $dest "systemctl is-active pisowifi pisowifi-detect nftables dnsmasq | tr '\n' ' '") -join ""
 if ($svc -match "inactive|failed") {

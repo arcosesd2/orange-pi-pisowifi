@@ -907,7 +907,7 @@ def admin():
     return render_template(
         "admin.html", sales=db.sales_summary(), active=active,
         rate=setting("minutes_per_peso"),
-        tiers=json.dumps(setting("bonus_tiers")),
+        tiers=setting("bonus_tiers"),
         name=setting("hotspot_name"), mock=slot.mock,
         remote=_remote_settings(), remote_last=reporter.last,
         device_id_default=socket.gethostname(), sys=sysinfo(),
@@ -1290,7 +1290,7 @@ def admin_diag():
     hw = hwcfg()
     return render_template(
         "diag.html", name=setting("hotspot_name"), hw=hw,
-        denominations=json.dumps(hw["denominations"]), mock=slot.mock,
+        denominations=hw["denominations"], mock=slot.mock,
         eint_pins=EINT_PINS,
     )
 
@@ -1322,7 +1322,7 @@ def admin_hardware():
     except (ValueError, KeyError, json.JSONDecodeError) as e:
         return render_template(
             "diag.html", name=setting("hotspot_name"), hw=hwcfg(),
-            denominations=json.dumps(setting("denominations")),
+            denominations=setting("denominations"),
             mock=slot.mock, eint_pins=EINT_PINS,
             error=f"Not saved — invalid value: {e}",
         ), 400

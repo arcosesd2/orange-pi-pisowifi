@@ -1,26 +1,30 @@
+{# Standalone: no nav, because there is nothing to navigate to until you are in. #}
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Admin login</title>
+<title>PisoWiFi — Log in</title>
+<link rel="stylesheet" href="/static/admin.css">
 <style>
-  body { font-family:system-ui,sans-serif; background:#0f172a; color:#e2e8f0;
-         min-height:100vh; display:flex; align-items:center; justify-content:center; }
-  form { background:#1e293b; padding:28px; border-radius:16px; display:flex;
-         flex-direction:column; gap:12px; width:min(90vw, 320px); }
-  input, button { padding:12px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:#e2e8f0; font-size:1rem; }
-  button { background:#fbbf24; color:#111; border:0; font-weight:700; cursor:pointer; }
-  .err { color:#f87171; font-size:.9rem; min-height:1em; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:24px 16px; }
+  .login { width:100%; max-width:340px; margin:0; }
+  .login .lock { font-size:1.6rem; }
+  .login h1 { font-size:1.1rem; margin:6px 0 2px; color:var(--accent); }
 </style>
 </head>
 <body>
-  <form method="post">
-    <strong>🔐 PisoWiFi Admin</strong>
-    <div class="err">{{ error or '' }}</div>
-    <input type="password" name="password" placeholder="Password" autofocus>
-    <button>Log in</button>
+  <form class="card login" method="post">
+    <div class="lock">🔐</div>
+    <h1>PisoWiFi admin</h1>
+    <p class="muted">Enter the admin password for this machine.</p>
+
+    {% if error %}<div class="notice bad" style="margin-top:12px">{{ error }}</div>{% endif %}
+
+    <label for="pw">Password</label>
+    <input id="pw" type="password" name="password" autofocus autocomplete="current-password">
+
+    <div class="actions"><button style="width:100%">Log in</button></div>
   </form>
 </body>
 </html>

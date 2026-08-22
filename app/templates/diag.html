@@ -1,68 +1,67 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ name }} — Diagnostics</title>
+{% extends "_admin_base.html" %}
+{% block title %}Diagnostics{% endblock %}
+
+{% block head %}
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0;
-          --ok:#4ade80; --bad:#f87171; --dim:#94a3b8; }
-  * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         padding:24px 16px; max-width:980px; margin:0 auto; }
-  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:4px; }
-  h2 { font-size:1rem; color:var(--dim); margin:22px 0 8px; }
-  nav a { color:var(--dim); margin-right:14px; text-decoration:none; font-size:.9rem; }
-  nav a.here { color:var(--accent); font-weight:700; }
-  .card { background:var(--card); border-radius:12px; padding:14px 16px; margin-top:8px; }
-  .row { display:flex; gap:16px; flex-wrap:wrap; }
-  .row > .card { flex:1; min-width:300px; }
-  table { width:100%; border-collapse:collapse; }
-  td, th { padding:5px 8px; border-bottom:1px solid #334155; font-size:.85rem; text-align:left; }
-  input, select, button { padding:7px 10px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:var(--txt); font-size:.9rem; }
-  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
-  button.ghost { background:#334155; color:var(--txt); }
-  label { display:block; margin:10px 0 4px; font-size:.8rem; color:var(--dim); }
-  .kv b { font-size:1.2rem; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.75rem; font-weight:700; }
-  .hi { background:#166534; color:#bbf7d0; }  .lo { background:#7f1d1d; color:#fecaca; }
-  .warn { background:#78350f; color:#fde68a; }
-  .err { color:var(--bad); margin:8px 0; }
-  /* pin header grid */
-  .header-grid { display:grid; grid-template-columns:1fr 44px 44px 1fr; gap:4px; align-items:center; }
-  .pin { width:44px; height:34px; border-radius:6px; border:1px solid #475569; color:var(--txt);
-         font-size:.75rem; font-weight:700; cursor:pointer; background:#0f172a; padding:0; }
-  .pin.power { background:#7f1d1d; cursor:default; }
-  .pin.ground { background:#374151; cursor:default; }
-  .pin.reserved { background:#78350f; }
-  .pin.active { outline:2px solid var(--accent); }
-  .pin.watch-hi { background:#166534; }  .pin.watch-lo { background:#1e3a8a; }
-  .pinlbl { font-size:.75rem; color:var(--dim); } .pinlbl.l { text-align:right; }
-  .pulsebar { display:flex; gap:3px; align-items:flex-end; height:40px; margin:8px 0; }
-  .pulsebar div { width:10px; background:var(--accent); border-radius:2px 2px 0 0; }
-  .muted { color:var(--dim); font-size:.8rem; }
+  /* Diagnostics-only widgets: the 26-pin header map, the pulse histogram and
+     the HIGH/LOW badges the polling JS writes. Everything else comes from
+     admin.css. */
+  .badge.hi { background: var(--ok-bg);  color: #bbf7d0; }
+  .badge.lo { background: #1e3a8a;       color: #bfdbfe; }
+
+  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 16px; }
+  .split > .card { margin-bottom: 0; }
+
+  .kv td:first-child { color: var(--muted); width: 52%; }
+  .kv td { padding: 7px 4px; }
+
+  .header-grid {
+    display: grid; grid-template-columns: 1fr 46px 46px 1fr;
+    gap: 4px; align-items: center;
+  }
+  .pin {
+    width: 46px; height: 34px; border-radius: 7px;
+    border: 1px solid var(--line); color: var(--txt);
+    font-size: .75rem; font-weight: 700; cursor: pointer;
+    background: var(--bg-soft); padding: 0;
+  }
+  .pin.power    { background: #7f1d1d; cursor: default; }
+  .pin.ground   { background: #374151; cursor: default; }
+  .pin.reserved { background: #78350f; }
+  .pin.active   { outline: 2px solid var(--accent); }
+  .pin.watch-hi { background: #166534; }
+  .pin.watch-lo { background: #1e3a8a; }
+  .pinlbl { font-size: .74rem; color: var(--muted); }
+  .pinlbl.l { text-align: right; }
+
+  .pulsebar {
+    display: flex; gap: 3px; align-items: flex-end;
+    height: 42px; margin: 8px 0;
+    background: var(--bg-soft); border-radius: var(--radius-sm);
+    padding: 4px 6px; overflow-x: auto;
+  }
+  .pulsebar div { width: 10px; flex: 0 0 auto; background: var(--accent); border-radius: 2px 2px 0 0; }
+
+  #pinpanel { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  #scanTable td, #scanTable th { font-size: .8rem; white-space: nowrap; }
+  .hw-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 20px; }
 </style>
-</head>
-<body>
-  <h1>🔧 {{ name }} — Diagnostics</h1>
-  <nav>
-    <a href="/admin">Dashboard</a>
-    <a href="/admin/vouchers">Vouchers</a>
-    <a href="/admin/devices">Devices</a>
-    <a href="/admin/audit">Audit</a>
-    <a class="here" href="/admin/diag">Diagnostics</a>
-    <a href="/admin/logout">Logout</a>
-  </nav>
+{% endblock %}
 
-  {% if mock %}<p class="badge warn" style="margin-top:10px">MOCK MODE — no GPIO library detected (dev PC); values are simulated</p>{% endif %}
-  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+{% block content %}
+  {% if mock %}
+  <div class="notice warn">
+    <b>Mock mode</b> — no GPIO library detected, so every value here is
+    simulated and real coins will not be counted.
+  </div>
+  {% endif %}
+  {% if error %}<div class="notice bad">{{ error }}</div>{% endif %}
 
-  <div class="row">
-    <!-- ============ coin acceptor monitor ============ -->
-    <div class="card">
-      <h2 style="margin-top:0">🪙 Coin acceptor monitor</h2>
-      <table>
+  <div class="split">
+    <!-- ================= coin acceptor monitor ================= -->
+    <section class="card">
+      <h2>🪙 Coin acceptor monitor</h2>
+      <table class="kv">
         <tr><td>Coin pin (physical)</td><td><b id="c-pin">{{ hw.coin_gpio_pin }}</b></td></tr>
         <tr><td>Live line level</td><td id="c-level">—</td></tr>
         <tr><td>Pulses in current train</td><td id="c-train">0</td></tr>
@@ -72,113 +71,200 @@
         <tr><td>Relay</td><td id="c-relay">—</td></tr>
       </table>
 
-      <label>Pulse timing (last 20 pulses, gap in ms — calibrate <i>pulse end gap</i> with this)</label>
+      <label>Pulse timing — last 20 pulses, bar height is the gap</label>
       <div class="pulsebar" id="c-bars"></div>
       <div class="muted" id="c-gaps"></div>
+      <p class="hint">Use this to calibrate <b>pulse end gap</b> below.</p>
 
-      <label>Relay test (forces relay regardless of customer window)</label>
-      <button onclick="relay(true)">Relay ON</button>
-      <button class="ghost" onclick="relay(false)">Relay OFF</button>
+      <label>Relay test <span style="font-weight:400">(ignores the customer window)</span></label>
+      <div class="actions" style="margin-top:0">
+        <button type="button" onclick="relay(true)">Relay ON</button>
+        <button type="button" class="ghost" onclick="relay(false)">Relay OFF</button>
+      </div>
 
-      <label>Inject test pulses (software — verifies counting &amp; denomination mapping)</label>
-      <button class="ghost" onclick="pulse(1)">1 pulse</button>
-      <button class="ghost" onclick="pulse(5)">5 pulses</button>
-      <button class="ghost" onclick="pulse(10)">10 pulses</button>
-    </div>
+      <label>Inject test pulses <span style="font-weight:400">(software — checks counting and mapping)</span></label>
+      <div class="actions" style="margin-top:0">
+        <button type="button" class="ghost" onclick="pulse(1)">1 pulse</button>
+        <button type="button" class="ghost" onclick="pulse(5)">5 pulses</button>
+        <button type="button" class="ghost" onclick="pulse(10)">10 pulses</button>
+      </div>
+    </section>
 
-    <!-- ============ pin tester ============ -->
-    <div class="card">
-      <h2 style="margin-top:0">📌 GPIO header — click a pin to test it</h2>
+    <!-- ================= pin tester ================= -->
+    <section class="card">
+      <h2>📌 GPIO header — tap a pin to test it</h2>
       <div class="header-grid" id="grid"></div>
-      <div id="pinpanel" style="display:none; margin-top:12px; border-top:1px solid #334155; padding-top:10px">
+
+      <div id="pinpanel" style="display:none">
         <b id="pp-title"></b> <span class="muted" id="pp-note"></span>
         <div id="pp-live" style="margin:8px 0"></div>
-        <label>Watch as input (live level + edge counter)</label>
+
+        <label for="pp-pull">Watch as input — live level and edge counter</label>
         <select id="pp-pull">
-          <option value="none">no pull (use external resistor)</option>
+          <option value="none">no pull (use an external resistor)</option>
           <option value="up">pull-up</option>
           <option value="down">pull-down</option>
         </select>
-        <button onclick="pinAct('watch',{pull:el('pp-pull').value})">Watch</button>
-        <button class="ghost" onclick="pinAct('reset_edges')">Reset edges</button>
-        <label>Drive as output — ⚠ make sure nothing that can short is wired to this pin</label>
-        <button onclick="pinAct('drive',{level:1})">HIGH (3.3V)</button>
-        <button class="ghost" onclick="pinAct('drive',{level:0})">LOW (0V)</button>
-        <button class="ghost" onclick="pinAct('release')">Release pin</button>
+        <div class="actions">
+          <button type="button" onclick="pinAct('watch',{pull:el('pp-pull').value})">Watch</button>
+          <button type="button" class="ghost" onclick="pinAct('reset_edges')">Reset edges</button>
+        </div>
+
+        <label>Drive as output</label>
+        <div class="notice warn" style="margin:0 0 8px">
+          Make sure nothing that can short is wired to this pin.
+        </div>
+        <div class="actions" style="margin-top:0">
+          <button type="button" onclick="pinAct('drive',{level:1})">HIGH (3.3 V)</button>
+          <button type="button" class="ghost" onclick="pinAct('drive',{level:0})">LOW (0 V)</button>
+          <button type="button" class="ghost" onclick="pinAct('release')">Release</button>
+        </div>
       </div>
-      <p class="muted" style="margin-top:10px">
-        🔴 power &nbsp; ⚫ ground &nbsp; 🟠 reserved (coin/relay — configured below) &nbsp;
-        🟢 watched HIGH &nbsp; 🔵 watched LOW.
-        Internal pull resistors can't be set through sysfs on the H3 — if the level
-        floats, add an external 10kΩ resistor.
+
+      <p class="hint">
+        🔴 power · ⚫ ground · 🟠 reserved (coin/relay) · 🟢 watched HIGH · 🔵 watched LOW.
+        Internal pull resistors cannot be set through sysfs on the H3 — if a
+        level floats, add an external 10 kΩ resistor.
       </p>
+    </section>
+  </div>
+
+  <!-- ================= noise scan ================= -->
+  <section class="card" style="margin-top:16px">
+    <div class="card-head">
+      <h2>🔍 Noise scan</h2>
+      <div class="spacer"></div>
+      <span id="scanStatus" class="muted">off</span>
     </div>
-  </div>
-
-  <!-- ============ all-pin noise scan ============ -->
-  <h2>🔍 Noise scan — listen on ALL pins at once</h2>
-  <div class="card">
-    <button id="scanBtn" onclick="toggleScan()">▶ Start scan</button>
-    <span id="scanStatus" class="muted" style="margin-left:8px">off</span>
-    <p class="muted" style="margin:8px 0">
-      Arms edge detection on every free GPIO pin simultaneously and records which
-      pins produce activity. Use it to find where a signal actually arrives: start
-      the scan, insert a coin (or press the button / wiggle the wire), and the pin
-      carrying it jumps to the top of the table. Note: unconnected pins float and
-      can pick up random electrical noise — judge by the counts, a real coin gives
-      a clean burst on one pin. Stop the scan when done (it uses CPU), the results
-      stay until the next scan. Manual pin testing above is disabled while scanning.
-      <br><b>IRQ</b> pins (PA*) catch every edge via hardware interrupt; <b>poll</b>
-      pins (PC*/PD14 — no interrupt line on the H3) are sampled ~100×/s, so pulses
-      shorter than ~10&nbsp;ms may be missed there. The coin acceptor must sit on an
-      IRQ pin — the hardware form only lets you pick those.
+    <div class="actions" style="margin-top:0">
+      <button type="button" id="scanBtn" onclick="toggleScan()">▶ Start scan</button>
+    </div>
+    <p class="hint">
+      Arms edge detection on every free GPIO pin at once so you can find where a
+      signal actually arrives: start the scan, insert a coin, and the pin carrying
+      it jumps to the top. Unconnected pins float and pick up noise — judge by the
+      counts, since a real coin gives a clean burst on one pin. Stop it when done;
+      it costs CPU, and manual pin testing is disabled while it runs.
+      <b>IRQ</b> pins (PA*) catch every edge in hardware; <b>poll</b> pins
+      (PC*/PD14) are sampled ~100×/s and can miss pulses under ~10 ms, which is
+      why the coin acceptor may only be assigned to an IRQ pin.
     </p>
-    <table id="scanTable"></table>
-  </div>
+    <div class="table-wrap"><table id="scanTable"></table></div>
+  </section>
 
-  <!-- ============ system ============ -->
-  <h2>🖥 System</h2>
-  <div class="card"><span class="muted" id="sysline">loading…</span></div>
+  <!-- ================= system ================= -->
+  <section class="card">
+    <h2>🖥 System</h2>
+    <span class="muted" id="sysline">loading…</span>
+  </section>
 
-  <!-- ============ hardware config ============ -->
-  <h2>⚙️ Hardware configuration</h2>
-  <div class="card">
-    <form method="post" action="/admin/hardware">
-      <div class="row">
-        <div style="flex:1;min-width:220px">
-          <label>Coin acceptor pin (physical pin number)</label>
+  <!-- ================= hardware config ================= -->
+  <section class="card">
+    <h2>⚙️ Hardware configuration</h2>
+    <p class="muted">Saving re-arms the GPIO immediately — no restart, no reboot.</p>
+
+    <form method="post" action="/admin/hardware" onsubmit="return packDenoms()">
+      <div class="hw-cols">
+        <div>
+          <label for="hw-coinpin">Coin acceptor pin <span style="font-weight:400">(physical number)</span></label>
           <select name="coin_gpio_pin" id="hw-coinpin"></select>
-          <label>Pulse edge — falling for the usual optocoupler wiring (line pulled LOW per pulse)</label>
-          <select name="coin_edge">
-            <option value="falling" {{ 'selected' if hw.coin_edge != 'rising' }}>falling (NO acceptor + optocoupler)</option>
+          <p class="hint">Only interrupt-capable pins are listed.</p>
+
+          <label for="ce">Pulse edge</label>
+          <select id="ce" name="coin_edge">
+            <option value="falling" {{ 'selected' if hw.coin_edge != 'rising' }}>falling — normal optocoupler wiring</option>
             <option value="rising" {{ 'selected' if hw.coin_edge == 'rising' }}>rising</option>
           </select>
-          <label>Debounce (ms) — ignore contact chatter shorter than this</label>
-          <input name="coin_bounce_ms" type="number" min="1" max="200" value="{{ hw.coin_bounce_ms }}">
-          <label>Pulse end gap (seconds) — silence that marks the end of one coin's pulse train.
-                 Too low: a ₱5 counts as five ₱1. Too high: slow crediting.</label>
-          <input name="pulse_end_gap_s" type="number" step="0.05" min="0.1" value="{{ hw.pulse_end_gap_s }}">
-          <label>Insert window (seconds) — how long the slot stays unlocked per customer</label>
-          <input name="insert_window_s" type="number" min="10" value="{{ hw.insert_window_s }}">
+
+          <label for="cb">Debounce (ms)</label>
+          <input id="cb" name="coin_bounce_ms" type="number" min="1" max="200" value="{{ hw.coin_bounce_ms }}">
+          <p class="hint">Ignores contact chatter shorter than this.</p>
+
+          <label for="pg">Pulse end gap (seconds)</label>
+          <input id="pg" name="pulse_end_gap_s" type="number" step="0.05" min="0.1" value="{{ hw.pulse_end_gap_s }}">
+          <p class="hint">Silence that marks the end of one coin. Too low and a ₱5 counts as five ₱1; too high and crediting feels slow.</p>
+
+          <label for="iw">Insert window (seconds)</label>
+          <input id="iw" name="insert_window_s" type="number" min="10" value="{{ hw.insert_window_s }}">
+          <p class="hint">How long the slot stays unlocked for one customer.</p>
         </div>
-        <div style="flex:1;min-width:220px">
-          <label>Relay pin (0 = no relay)</label>
+
+        <div>
+          <label for="hw-relaypin">Relay pin</label>
           <select name="relay_gpio_pin" id="hw-relaypin"></select>
-          <label><input type="checkbox" name="relay_active_low" style="width:auto"
-                 {{ 'checked' if hw.relay_active_low }}> Relay is active-LOW (most cheap relay boards are)</label>
-          <label>Denominations — pulses → peso value (JSON). Train the acceptor so each
-                 coin emits a distinct pulse count, then map it here.</label>
-          <input name="denominations" value='{{ denominations }}' style="width:100%">
-          <label>Fallback peso value per pulse (used when a pulse count isn't in the table)</label>
-          <input name="pulse_value_pesos" type="number" min="1" value="{{ hw.pulse_value_pesos }}">
+          <label class="check" style="margin-top:10px">
+            <input type="checkbox" name="relay_active_low" {{ 'checked' if hw.relay_active_low }}>
+            <span>Relay is active-LOW <span class="muted">(most cheap relay boards are)</span></span>
+          </label>
+
+          <label>Coin denominations</label>
+          <p class="hint" style="margin:0 0 8px">
+            How many pulses the acceptor emits for each coin. Train the acceptor
+            so every coin gives a distinct count, then map them here.
+          </p>
+          <div class="rates" id="denoms"></div>
+          <div class="rate-empty" id="denomsEmpty" hidden>
+            No mapping — every pulse is worth the fallback value below.
+          </div>
+          <div class="actions">
+            <button type="button" class="ghost" onclick="addDenom('','')">+ Add coin</button>
+          </div>
+          <input type="hidden" name="denominations" id="denomsJson">
+
+          <label for="pv">Fallback — pesos per pulse</label>
+          <input id="pv" name="pulse_value_pesos" type="number" min="1" value="{{ hw.pulse_value_pesos }}">
+          <p class="hint">Used when a pulse count is not in the table above.</p>
         </div>
       </div>
-      <div style="margin-top:14px"><button>Save &amp; apply live</button>
-        <span class="muted">— re-arms the GPIO immediately, no restart needed</span></div>
-    </form>
-  </div>
 
+      <div class="actions"><button>Save &amp; apply live</button></div>
+    </form>
+  </section>
+{% endblock %}
+
+{% block script %}
 <script>
+const DENOMS = {{ denominations | tojson }};
+
+function addDenom(pulses, pesos) {
+  const row = document.createElement('div');
+  row.className = 'rate-row';
+  row.innerHTML =
+    '<span class="peso-sign">⚡</span>' +
+    '<input type="number" min="1" class="d-pulse" value="' + pulses + '" placeholder="5" aria-label="Pulses">' +
+    '<span class="arrow">&rarr;</span>' +
+    '<input type="number" min="1" class="d-peso" value="' + pesos + '" placeholder="5" aria-label="Pesos">' +
+    '<button type="button" class="danger tiny" aria-label="Remove">&#10005;</button>' +
+    '<div class="derived"></div>';
+  const upd = function () {
+    const a = parseInt(row.querySelector('.d-pulse').value, 10);
+    const b = parseInt(row.querySelector('.d-peso').value, 10);
+    row.querySelector('.derived').innerHTML = (a && b)
+      ? a + ' pulse' + (a === 1 ? '' : 's') + ' is a <b>₱' + b + '</b> coin'
+      : 'Pulses the acceptor emits, and the coin they mean.';
+  };
+  row.querySelector('button').addEventListener('click', function () { row.remove(); denomEmpty(); });
+  row.querySelectorAll('input').forEach(function (i) { i.addEventListener('input', upd); });
+  document.getElementById('denoms').appendChild(row);
+  upd(); denomEmpty();
+}
+function denomEmpty() {
+  document.getElementById('denomsEmpty').hidden =
+    document.querySelectorAll('#denoms .rate-row').length > 0;
+}
+function packDenoms() {
+  const o = {};
+  document.querySelectorAll('#denoms .rate-row').forEach(function (row) {
+    const a = row.querySelector('.d-pulse').value, b = row.querySelector('.d-peso').value;
+    if (a && b) o[parseInt(a, 10)] = parseInt(b, 10);
+  });
+  document.getElementById('denomsJson').value = JSON.stringify(o);
+  return true;
+}
+Object.entries(DENOMS).sort(function (a, b) { return a[0] - b[0]; })
+  .forEach(function (e) { addDenom(e[0], e[1]); });
+denomEmpty();
+
 const el = id => document.getElementById(id);
 const HW = { coin: {{ hw.coin_gpio_pin }}, relay: {{ hw.relay_gpio_pin or 0 }} };
 const EINT = {{ eint_pins | tojson }};   // interrupt-capable pins (coin acceptor must use one)
@@ -211,6 +297,7 @@ function lbl(p, side) {
 }
 function btn(p) {
   const b = document.createElement('button');
+  b.type = 'button';
   b.className = 'pin ' + p.kind + (p.reserved ? ' reserved' : '');
   if (p.mode === 'watch') b.classList.add(p.level ? 'watch-hi' : 'watch-lo');
   if (p.pin === selected) b.classList.add('active');
@@ -261,7 +348,7 @@ function renderScan(s, coin) {
   scanActive = !!s.active;
   el('scanBtn').textContent = s.active ? '⏹ Stop scan' : '▶ Start scan';
   el('scanStatus').textContent = s.active ? `scanning… ${s.duration_s}s`
-      : (s.rows ? `stopped — showing results of a ${s.duration_s}s scan` : 'off');
+      : (s.rows ? `stopped — results of a ${s.duration_s}s scan` : 'off');
   if (!s.rows) { el('scanTable').innerHTML = ''; return; }
   const fmtAgo = v => v === null ? '—' : (v < 60 ? v + 's' : Math.round(v/60) + 'm') + ' ago';
   const rows = s.rows.slice().sort((a, b) => (b.edges - a.edges) || (a.pin - b.pin));
@@ -279,9 +366,9 @@ function renderScan(s, coin) {
     coinRow +
     rows.map(r => `<tr${r.edges ? ' style="background:#16653433"' : ''}>
       <td>${r.pin}</td><td>${r.name}</td>
-      <td>${r.method === 'poll' ? '<span class="badge" style="background:#334155">poll</span>'
-           : '<span class="badge" style="background:#1e3a8a">IRQ</span>'}</td>
-      <td>${r.error ? '<span class="badge lo">ERROR</span>'
+      <td>${r.method === 'poll' ? '<span class="badge off">poll</span>'
+           : '<span class="badge lo">IRQ</span>'}</td>
+      <td>${r.error ? '<span class="badge bad">ERROR</span>'
            : r.edges ? '<span class="badge hi">ACTIVE</span>'
            : '<span class="muted">quiet</span>'}</td>
       <td><b>${r.edges}</b></td>
@@ -325,14 +412,5 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 700);
-// stamp CSRF token into the hardware-config POST form
-document.querySelectorAll('form').forEach(f => {
-  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
-    const i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'csrf'; i.value = '{{ csrf }}';
-    f.appendChild(i);
-  }
-});
 </script>
-</body>
-</html>
+{% endblock %}

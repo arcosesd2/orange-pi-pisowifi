@@ -1,97 +1,99 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ name }} — Vouchers</title>
+{% extends "_admin_base.html" %}
+{% block title %}Vouchers{% endblock %}
+
+{% block head %}
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; }
-  * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         padding:24px 16px; max-width:820px; margin:0 auto; }
-  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:16px; }
-  h2 { font-size:1rem; color:#94a3b8; margin:20px 0 8px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; }
-  td, th { padding:7px 9px; border-bottom:1px solid #334155; font-size:.85rem; text-align:left; }
-  input, select, button { padding:8px 12px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:var(--txt); font-size:.95rem; }
-  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
-  form.inline { display:inline; }
-  label { display:block; margin:8px 0 4px; font-size:.8rem; color:#94a3b8; }
-  nav a { color:#94a3b8; margin-right:14px; text-decoration:none; font-size:.9rem; }
-  nav a.here { color:var(--accent); font-weight:700; }
-  nav { margin-bottom:16px; }
-  code { font-family:ui-monospace,monospace; letter-spacing:.08em; font-weight:700; }
-  .used { color:#64748b; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
-  .muted { color:#94a3b8; font-size:.8rem; }
-  @media print { nav, form, .noprint { display:none } body { color:#000 } code { font-size:1.1rem } }
-</style>
-</head>
-<body>
-  <h1>🎟 {{ name }} — Vouchers</h1>
-  <nav class="noprint">
-    <a href="/admin">Dashboard</a>
-    <a class="here" href="/admin/vouchers">Vouchers</a>
-    <a href="/admin/devices">Devices</a>
-    <a href="/admin/audit">Audit</a>
-    <a href="/admin/diag">Diagnostics</a>
-    <a href="/admin/logout">Logout</a>
-  </nav>
-
-  <p class="muted">{{ stats.unused }} unused · {{ stats.used }} used · {{ stats.total }} total
-     — <a href="/admin/vouchers.csv" style="color:var(--accent)">export CSV</a></p>
-
-  <h2>Generate a batch</h2>
-  <form method="post" action="/admin/vouchers/generate" class="noprint">
-    <div class="row">
-      <div><label>How many</label><input name="count" type="number" min="1" max="500" value="10" style="width:90px"></div>
-      <div><label>Minutes each</label><input name="minutes" type="number" min="1" value="60" style="width:100px"></div>
-      <div><label>Price ₱ (for reports)</label><input name="price" type="number" min="0" value="5" style="width:90px"></div>
-      <div><label>Speed</label>
-        <select name="speed">
-          <option value="">(default)</option>
-          {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><label>Batch label</label><input name="batch" placeholder="auto" style="width:130px"></div>
-      <div><label>Expires (days, 0=never)</label><input name="expires_days" type="number" min="0" value="0" style="width:90px"></div>
-      <div><button>Generate</button></div>
-    </div>
-  </form>
-
-  <h2>Codes</h2>
-  <table>
-    <tr><th>Code</th><th>Min</th><th>₱</th><th>Speed</th><th>Batch</th><th>Status</th><th class="noprint"></th></tr>
-    {% for v in vouchers %}
-    <tr class="{{ 'used' if v.used_at }}">
-      <td><code>{{ v.code }}</code></td>
-      <td>{{ v.minutes }}</td>
-      <td>{{ v.price or '' }}</td>
-      <td>{{ v.speed or '' }}</td>
-      <td>{{ v.batch or '' }}</td>
-      <td>{% if v.used_at %}used{% if v.used_by_mac %} · {{ v.used_by_mac }}{% endif %}{% else %}unused{% endif %}</td>
-      <td class="noprint">
-        {% if not v.used_at %}
-        <form class="inline" method="post" action="/admin/vouchers/revoke">
-          <input type="hidden" name="code" value="{{ v.code }}"><button>Void</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="7">No vouchers yet — generate a batch above.</td></tr>
-    {% endfor %}
-  </table>
-  <p class="muted noprint" style="margin-top:8px">Tip: use your browser's Print to make printable cards (nav/forms are hidden when printing).</p>
-<script>
-document.querySelectorAll('form').forEach(f => {
-  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
-    const i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'csrf'; i.value = '{{ csrf }}';
-    f.appendChild(i);
+  /* Printing turns this page into cut-out voucher cards, so everything that
+     is not a code has to disappear. */
+  @media print {
+    .topbar, .noprint, .footer { display: none !important; }
+    body { background: #fff; color: #000; padding: 0; }
+    .card { border: 0; background: #fff; padding: 0; }
+    main { padding: 0; max-width: none; }
+    table { font-size: 11pt; }
+    td, th { border-color: #bbb; color: #000; }
+    tr.used { opacity: .4; }
+    .badge { border: 1px solid #999; }
   }
-});
-</script>
-</body>
-</html>
+  tr.used td { opacity: .55; }
+  .gen-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px 12px;
+    align-items: end;
+  }
+  .gen-grid label { margin-top: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="stats noprint">
+    <div class="stat"><div class="k">Unused</div><div class="v">{{ stats.unused }}</div><div class="n">ready to sell</div></div>
+    <div class="stat"><div class="k">Used</div><div class="v">{{ stats.used }}</div><div class="n">redeemed</div></div>
+    <div class="stat"><div class="k">Total</div><div class="v">{{ stats.total }}</div><div class="n">ever generated</div></div>
+  </div>
+
+  <section class="card noprint">
+    <h2>Generate a batch</h2>
+    <p class="muted">Codes are printable — use your browser's Print once they exist.</p>
+    <form method="post" action="/admin/vouchers/generate">
+      <div class="gen-grid">
+        <div><label for="c">How many</label><input id="c" name="count" type="number" min="1" max="500" value="10"></div>
+        <div><label for="m">Minutes each</label><input id="m" name="minutes" type="number" min="1" value="60"></div>
+        <div><label for="p">Price ₱</label><input id="p" name="price" type="number" min="0" value="5"></div>
+        <div><label for="s">Speed</label>
+          <select id="s" name="speed">
+            <option value="">default</option>
+            {% for prof in profiles %}<option value="{{ prof }}">{{ prof }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="b">Batch label</label><input id="b" name="batch" placeholder="auto"></div>
+        <div><label for="e">Expires (days)</label><input id="e" name="expires_days" type="number" min="0" value="0"></div>
+      </div>
+      <div class="actions"><button>Generate batch</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Codes</h2>
+      <div class="spacer"></div>
+      <a href="/admin/vouchers.csv" class="muted noprint">Export CSV</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th class="num">Min</th><th class="num">₱</th>
+              <th>Speed</th><th>Batch</th><th>Status</th><th class="noprint"></th></tr>
+        </thead>
+        <tbody>
+        {% for v in vouchers %}
+          <tr class="{{ 'used' if v.used_at }}">
+            <td><code>{{ v.code }}</code></td>
+            <td class="num">{{ v.minutes }}</td>
+            <td class="num">{{ v.price or '' }}</td>
+            <td>{{ v.speed or '—' }}</td>
+            <td>{{ v.batch or '—' }}</td>
+            <td>
+              {% if v.used_at %}
+                <span class="badge off">used</span>
+                {% if v.used_by_mac %}<span class="muted mono"> {{ v.used_by_mac }}</span>{% endif %}
+              {% else %}<span class="badge ok">unused</span>{% endif %}
+            </td>
+            <td class="noprint" style="text-align:right">
+              {% if not v.used_at %}
+              <form class="inline" method="post" action="/admin/vouchers/revoke">
+                <input type="hidden" name="code" value="{{ v.code }}">
+                <button class="danger tiny">Void</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="empty">No vouchers yet — generate a batch above</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

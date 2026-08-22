@@ -1,68 +1,62 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ name }} — Branding</title>
+{% extends "_admin_base.html" %}
+{% block title %}Branding{% endblock %}
+
+{% block head %}
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; }
-  * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         padding:24px 16px; max-width:640px; margin:0 auto; }
-  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:16px; }
-  h2 { font-size:1rem; color:#94a3b8; margin:20px 0 8px; }
-  .card { background:var(--card); border-radius:12px; padding:16px; }
-  input, button { padding:8px 12px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:var(--txt); font-size:.95rem; }
-  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
-  label { display:block; margin:12px 0 4px; font-size:.85rem; color:#94a3b8; }
-  nav a { color:#94a3b8; margin-right:14px; text-decoration:none; font-size:.9rem; }
-  nav a.here { color:var(--accent); font-weight:700; }
-  nav { margin-bottom:16px; }
-  img.preview { max-height:70px; border-radius:6px; margin-top:6px; background:#000; }
-  .chk { display:flex; align-items:center; gap:8px; margin:8px 0; }
-  .chk input { width:auto; }
-</style>
-</head>
-<body>
-  <h1>🎨 {{ name }} — Branding</h1>
-  <nav>
-    <a href="/admin">Dashboard</a>
-    <a href="/admin/vouchers">Vouchers</a>
-    <a href="/admin/devices">Devices</a>
-    <a class="here" href="/admin/branding">Branding</a>
-    <a href="/admin/schedules">Schedule</a>
-    <a href="/admin/logout">Logout</a>
-  </nav>
-
-  <form class="card" method="post" action="/admin/branding" enctype="multipart/form-data">
-    <label>Accent colour</label>
-    <input type="color" name="color" value="{{ b.color or '#fbbf24' }}" style="width:80px;height:38px;padding:2px">
-
-    <label>Logo (jpg/png/svg)</label>
-    {% if b.logo %}<img class="preview" src="/branding/{{ b.logo }}"><br>
-      <label class="chk"><input type="checkbox" name="clear_logo"> remove logo</label>{% endif %}
-    <input type="file" name="logo" accept="image/*">
-
-    <label>Banner</label>
-    {% if b.banner %}<img class="preview" src="/branding/{{ b.banner }}"><br>
-      <label class="chk"><input type="checkbox" name="clear_banner"> remove banner</label>{% endif %}
-    <input type="file" name="banner" accept="image/*">
-
-    <h2>Portal buttons</h2>
-    <label class="chk"><input type="checkbox" name="show_redeem" {{ 'checked' if b.show_redeem }}> Show "Redeem code"</label>
-    <label class="chk"><input type="checkbox" name="show_trial"  {{ 'checked' if b.show_trial }}> Show "Free trial" (when trial is enabled)</label>
-    <label class="chk"><input type="checkbox" name="show_pause"  {{ 'checked' if b.show_pause }}> Show Pause/Resume</label>
-
-    <div style="margin-top:16px"><button>Save</button></div>
-  </form>
-<script>
-document.querySelectorAll('form').forEach(f => {
-  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
-    const i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'csrf'; i.value = '{{ csrf }}'; f.appendChild(i);
+  .preview {
+    max-width: 100%;
+    max-height: 110px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--bg-soft);
+    display: block;
+    margin-bottom: 8px;
   }
-});
-</script>
-</body>
-</html>
+  .swatch-row { display: flex; align-items: center; gap: 12px; }
+  .swatch-row input[type=color] {
+    width: 62px; height: 42px; padding: 3px; cursor: pointer; flex: 0 0 auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+  <form method="post" action="/admin/branding" enctype="multipart/form-data">
+    <section class="card">
+      <h2>Look of the customer portal</h2>
+      <p class="muted">This is what people see when they connect. Changes apply immediately.</p>
+
+      <label for="col">Accent colour</label>
+      <div class="swatch-row">
+        <input id="col" type="color" name="color" value="{{ b.color or '#fbbf24' }}">
+        <span class="muted">Buttons, headings and the countdown on the portal.</span>
+      </div>
+
+      <label for="logo">Logo <span style="font-weight:400">(jpg, png or svg)</span></label>
+      {% if b.logo %}
+        <img class="preview" src="/branding/{{ b.logo }}" alt="current logo">
+        <label class="check"><input type="checkbox" name="clear_logo"> <span>Remove the current logo</span></label>
+      {% endif %}
+      <input id="logo" type="file" name="logo" accept="image/*">
+
+      <label for="ban">Banner</label>
+      {% if b.banner %}
+        <img class="preview" src="/branding/{{ b.banner }}" alt="current banner">
+        <label class="check"><input type="checkbox" name="clear_banner"> <span>Remove the current banner</span></label>
+      {% endif %}
+      <input id="ban" type="file" name="banner" accept="image/*">
+    </section>
+
+    <section class="card">
+      <h2>Portal buttons</h2>
+      <p class="muted">Hide anything you do not offer, so customers are not shown a dead end.</p>
+      <label class="check"><input type="checkbox" name="show_redeem" {{ 'checked' if b.show_redeem }}>
+        <span>Show <b>Redeem code</b> — for voucher customers</span></label>
+      <label class="check"><input type="checkbox" name="show_trial" {{ 'checked' if b.show_trial }}>
+        <span>Show <b>Free trial</b> — only appears when trials are enabled</span></label>
+      <label class="check"><input type="checkbox" name="show_pause" {{ 'checked' if b.show_pause }}>
+        <span>Show <b>Pause / Resume</b> — lets customers bank unused time</span></label>
+
+      <div class="actions"><button>Save branding</button></div>
+    </section>
+  </form>
+{% endblock %}

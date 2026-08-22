@@ -1,0 +1,412 @@
+/* PisoWiFi admin UI — one stylesheet for every admin page.
+ *
+ * Each template used to carry its own copy of a <style> block, so the eight
+ * pages drifted apart. This is the single source; templates only extend
+ * _admin_base.html and add markup.
+ *
+ * Designed phone-first on purpose: the owner runs this machine from a handset
+ * standing next to it, not from a desk. Everything must stay usable at 360px.
+ */
+
+:root {
+  --bg:        #0f172a;
+  --bg-soft:   #131c31;
+  --card:      #1e293b;
+  --card-2:    #243449;
+  --line:      #334155;
+  --line-soft: #26344a;
+  --txt:       #e2e8f0;
+  --muted:     #94a3b8;
+  --accent:    #fbbf24;
+  --accent-dk: #b45309;
+  --ok:        #34d399;
+  --ok-bg:     #064e3b;
+  --bad:       #f87171;
+  --bad-bg:    #7f1d1d;
+  --warn:      #fbbf24;
+  --warn-bg:   #78350f;
+  --radius:    14px;
+  --radius-sm: 9px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  line-height: 1.5;
+  padding-bottom: 48px;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, .92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.topbar-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand-sub {
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.topbar .spacer { flex: 1; }
+
+.logout {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .85rem;
+  border: 1px solid var(--line);
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.logout:hover { color: var(--txt); border-color: var(--muted); }
+
+/* Horizontal scrolling tab strip — eight tabs never fit on a phone, and a
+ * wrapped nav pushes the actual content off the first screen. */
+.tabs {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 16px 10px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tabs a {
+  flex: 0 0 auto;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tabs a:hover { color: var(--txt); background: var(--card); }
+.tabs a.here {
+  color: #111;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ----------------------------------------------------------------- layout */
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 18px 16px 0;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card > h2:first-child,
+.card > .card-head:first-child { margin-top: 0; }
+
+h2 {
+  font-size: .95rem;
+  margin: 0 0 12px;
+  color: var(--txt);
+  font-weight: 700;
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.card-head h2 { margin: 0; }
+.card-head .spacer { flex: 1; }
+
+p { margin: 0 0 10px; }
+p:last-child { margin-bottom: 0; }
+
+a { color: var(--accent); }
+
+.muted { color: var(--muted); font-size: .82rem; }
+.hint  { color: var(--muted); font-size: .8rem; margin: 6px 0 0; }
+
+/* ------------------------------------------------------------ stat cards */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.stat .k {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.stat .v {
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+.stat .n { font-size: .78rem; color: var(--muted); }
+
+/* ----------------------------------------------------------------- forms */
+
+label {
+  display: block;
+  margin: 14px 0 5px;
+  font-size: .82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+label:first-child { margin-top: 0; }
+
+label.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--txt);
+  font-weight: 500;
+  font-size: .9rem;
+}
+label.check input { width: auto; margin-top: 3px; flex: 0 0 auto; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--txt);
+  font-size: .95rem;
+  font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+input[type=file] { padding: 8px; }
+input[type=checkbox] { width: auto; accent-color: var(--accent); }
+
+button, .btn {
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: var(--accent);
+  color: #111;
+  font-weight: 700;
+  font-size: .9rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+}
+button:hover, .btn:hover { filter: brightness(1.08); }
+button:disabled { opacity: .55; cursor: default; }
+
+button.ghost, .btn.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--txt);
+  font-weight: 600;
+}
+button.ghost:hover { border-color: var(--muted); background: var(--card-2); }
+
+button.danger {
+  background: transparent;
+  border: 1px solid #7f1d1d;
+  color: var(--bad);
+  font-weight: 600;
+}
+button.danger:hover { background: #7f1d1d22; }
+
+button.tiny { padding: 5px 10px; font-size: .78rem; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  align-items: center;
+}
+
+form.inline { display: inline; }
+
+/* ---------------------------------------------------------------- tables */
+
+.table-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+
+table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+
+th {
+  text-align: left;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--card-2); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.mac { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .82rem; }
+
+.empty {
+  color: var(--muted);
+  font-size: .88rem;
+  text-align: center;
+  padding: 22px 10px;
+}
+
+/* --------------------------------------------------------------- badges */
+
+.badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: .72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.badge.ok   { background: var(--ok-bg);   color: #bbf7d0; }
+.badge.bad  { background: var(--bad-bg);  color: #fecaca; }
+.badge.warn { background: var(--warn-bg); color: #fde68a; }
+.badge.off  { background: var(--card-2);  color: var(--muted); }
+
+.notice {
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  font-size: .85rem;
+  margin-bottom: 14px;
+  border: 1px solid;
+}
+.notice.warn { background: #78350f33; border-color: #78350f; color: #fde68a; }
+.notice.bad  { background: #7f1d1d33; border-color: #7f1d1d; color: #fecaca; }
+.notice.info { background: #1e3a5f33; border-color: #1e3a5f; color: #bfdbfe; }
+
+/* ------------------------------------------------- coin → time editor */
+
+/* The rate table is the single most-edited thing in this UI, and it used to
+ * be three bare number inputs in a row with no indication of what the numbers
+ * actually bought. Each row now reads as a sentence and shows the resulting
+ * duration and hourly rate as you type. */
+.rates { display: flex; flex-direction: column; gap: 8px; }
+
+.rate-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+}
+.rate-row .peso-sign,
+.rate-row .arrow {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: .9rem;
+}
+.rate-row input { padding: 8px 10px; font-weight: 600; }
+.rate-row .t-p { max-width: 92px; }
+.rate-row .t-m { max-width: 100px; }
+
+.rate-row .derived {
+  grid-column: 1 / -1;
+  font-size: .76rem;
+  color: var(--muted);
+  padding-left: 2px;
+}
+.rate-row .derived b { color: var(--accent); font-weight: 700; }
+
+@media (max-width: 430px) {
+  .rate-row { grid-template-columns: auto 1fr auto; }
+  .rate-row .arrow { display: none; }
+  .rate-row .t-m { max-width: none; }
+}
+
+.rate-empty {
+  color: var(--muted);
+  font-size: .85rem;
+  padding: 14px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------------------------------------------- chart */
+
+.chart { overflow-x: auto; }
+.chart svg { width: 100%; min-width: 340px; height: 150px; display: block; }
+
+/* -------------------------------------------------------------- footer */
+
+.footer {
+  max-width: 900px;
+  margin: 20px auto 0;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+code, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }

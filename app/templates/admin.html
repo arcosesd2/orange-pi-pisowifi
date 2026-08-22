@@ -1,225 +1,299 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ name }} — Admin</title>
-<style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; }
-  * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         padding:24px 16px; max-width:760px; margin:0 auto; }
-  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:16px; }
-  h2 { font-size:1rem; color:#94a3b8; margin:20px 0 8px; }
-  .cards { display:flex; gap:12px; flex-wrap:wrap; }
-  .stat { background:var(--card); border-radius:12px; padding:14px 18px; flex:1; min-width:120px; }
-  .stat b { font-size:1.5rem; display:block; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; }
-  td, th { padding:8px 10px; border-bottom:1px solid #334155; font-size:.9rem; text-align:left; }
-  input, button { padding:8px 12px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:var(--txt); font-size:.95rem; }
-  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
-  form.inline { display:inline; }
-  label { display:block; margin:10px 0 4px; font-size:.85rem; color:#94a3b8; }
-  nav a { color:#94a3b8; margin-right:14px; text-decoration:none; font-size:.9rem; }
-  nav a.here { color:var(--accent); font-weight:700; }
-  nav { margin-bottom:16px; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:.75rem; font-weight:700; }
-  .ok { background:#166534; color:#bbf7d0; } .bad { background:#7f1d1d; color:#fecaca; }
-  .muted { color:#94a3b8; font-size:.8rem; }
-</style>
-</head>
-<body>
-  <h1>⚙️ {{ name }} — Admin</h1>
-  <nav>
-    <a class="here" href="/admin">Dashboard</a>
-    <a href="/admin/vouchers">Vouchers</a>
-    <a href="/admin/devices">Devices</a>
-    <a href="/admin/branding">Branding</a>
-    <a href="/admin/schedules">Schedule</a>
-    <a href="/admin/pppoe">PPPoE</a>
-    <a href="/admin/audit">Audit</a>
-    <a href="/admin/diag">Diagnostics</a>
-    <a href="/admin/logout">Logout</a>
-  </nav>
+{% extends "_admin_base.html" %}
+{% block title %}Dashboard{% endblock %}
 
-  <div class="cards">
-    <div class="stat">Today<b>₱{{ sales.today.pesos }}</b>{{ sales.today.count }} sales</div>
-    <div class="stat">7 days<b>₱{{ sales.week.pesos }}</b>{{ sales.week.count }} sales</div>
-    <div class="stat">All time<b>₱{{ sales.all_time.pesos }}</b>{{ sales.all_time.count }} sales</div>
+{% block content %}
+  <div class="stats">
+    <div class="stat">
+      <div class="k">Today</div>
+      <div class="v">₱{{ sales.today.pesos }}</div>
+      <div class="n">{{ sales.today.count }} sales</div>
+    </div>
+    <div class="stat">
+      <div class="k">7 days</div>
+      <div class="v">₱{{ sales.week.pesos }}</div>
+      <div class="n">{{ sales.week.count }} sales</div>
+    </div>
+    <div class="stat">
+      <div class="k">All time</div>
+      <div class="v">₱{{ sales.all_time.pesos }}</div>
+      <div class="n">{{ sales.all_time.count }} sales</div>
+    </div>
   </div>
 
-  <h2>Last 14 days <a href="/admin/sales.csv" style="color:var(--accent);font-size:.8rem">export CSV</a></h2>
-  <div style="background:var(--card);border-radius:12px;padding:14px;overflow-x:auto">
-    {% set ns = namespace(max=1) %}
-    {% for d, p, n in daily %}{% if p > ns.max %}{% set ns.max = p %}{% endif %}{% endfor %}
-    <svg viewBox="0 0 {{ daily|length * 26 }} 130" style="width:100%;min-width:360px;height:150px">
-      {% for d, p, n in daily %}
-        {% set h = (p / ns.max * 100) | round(1) %}
-        <rect x="{{ loop.index0 * 26 + 4 }}" y="{{ 110 - h }}" width="18" height="{{ h if h > 0 else 0.5 }}"
-              rx="2" fill="var(--accent)"><title>{{ d }}: ₱{{ p }} · {{ n }} sales</title></rect>
-        <text x="{{ loop.index0 * 26 + 13 }}" y="122" font-size="8" fill="#94a3b8"
-              text-anchor="middle">{{ d[8:10] }}</text>
-      {% endfor %}
-    </svg>
-  </div>
+  <section class="card">
+    <div class="card-head">
+      <h2>Last 14 days</h2>
+      <div class="spacer"></div>
+      <a href="/admin/sales.csv" class="muted">Export CSV</a>
+    </div>
+    <div class="chart">
+      {% set ns = namespace(max=1) %}
+      {% for d, p, n in daily %}{% if p > ns.max %}{% set ns.max = p %}{% endif %}{% endfor %}
+      <svg viewBox="0 0 {{ daily|length * 26 }} 130" preserveAspectRatio="none">
+        {% for d, p, n in daily %}
+          {% set h = (p / ns.max * 100) | round(1) %}
+          <rect x="{{ loop.index0 * 26 + 4 }}" y="{{ 110 - h }}" width="18"
+                height="{{ h if h > 0 else 0.5 }}" rx="2" fill="var(--accent)"
+                opacity="{{ '1' if p else '.25' }}"><title>{{ d }}: ₱{{ p }} · {{ n }} sales</title></rect>
+          <text x="{{ loop.index0 * 26 + 13 }}" y="122" font-size="8" fill="#94a3b8"
+                text-anchor="middle">{{ d[8:10] }}</text>
+        {% endfor %}
+      </svg>
+    </div>
+  </section>
 
   {% if mock %}
-  <h2>Simulator (no GPIO detected)</h2>
-  <form class="inline" method="post" action="/admin/simulate-coin">
-    <input type="hidden" name="pesos" value="1"><button>+ ₱1</button>
-  </form>
-  <form class="inline" method="post" action="/admin/simulate-coin">
-    <input type="hidden" name="pesos" value="5"><button>+ ₱5</button>
-  </form>
-  <form class="inline" method="post" action="/admin/simulate-coin">
-    <input type="hidden" name="pesos" value="10"><button>+ ₱10</button>
-  </form>
-  {% endif %}
-
-  <h2>Active clients</h2>
-  <table>
-    <tr><th>MAC</th><th>Remaining</th><th>State</th><th></th></tr>
-    {% for s in active %}
-    <tr>
-      <td>{{ s.mac }}</td>
-      <td>{{ '%d:%02d' % (s.remaining // 3600, s.remaining % 3600 // 60) }}</td>
-      <td>{{ 'paused' if s.paused else 'online' }}</td>
-      <td>
-        <form class="inline" method="post" action="/admin/kick">
-          <input type="hidden" name="mac" value="{{ s.mac }}"><button>Kick</button>
-        </form>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="4">No active clients</td></tr>
-    {% endfor %}
-  </table>
-
-  <h2>Recent sales</h2>
-  <table>
-    <tr><th>When</th><th>MAC</th><th>₱</th><th>Minutes</th></tr>
-    {% for s in sales.recent %}
-    <tr><td>{{ s.when }}</td><td>{{ s.mac }}</td><td>{{ s.pesos }}</td><td>{{ s.minutes }}</td></tr>
-    {% endfor %}
-  </table>
-
-  <h2>Settings</h2>
-  <form method="post" action="/admin/settings" onsubmit="return packTiers()">
-    <label>Hotspot name</label>
-    <input name="hotspot_name" value="{{ name }}">
-    <label>Time per denomination — amount inserted → minutes of internet.
-           (Note: coins inserted in one go add up, so 5×₱1 gets the ₱5 time.)</label>
-    <table id="tierTable" style="max-width:360px">
-      <tr><th>₱ amount</th><th>Minutes</th><th></th></tr>
-    </table>
-    <div style="margin-top:6px"><button type="button" onclick="addTier('','')">+ Add denomination</button></div>
-    <input type="hidden" name="bonus_tiers" id="tiersJson">
-    <label>Fallback — minutes per ₱1, used for amounts not listed above</label>
-    <input name="minutes_per_peso" type="number" value="{{ rate }}">
-    <label>New admin password (blank = keep)</label>
-    <input name="admin_password" type="password">
-    <div style="margin-top:12px"><button>Save</button></div>
-  </form>
-
-  <h2>Remote monitoring — push earnings to your website</h2>
-  <p class="muted">
-    Sends a signed report (earnings, active clients, system health) to your
-    dashboard website every few minutes — view it from your phone anywhere.
-    See <b>server/README.md</b> in the project for the ready-made website.
-    Hardware pins are configured on the <a href="/admin/diag" style="color:var(--accent)">Diagnostics</a> page.
-  </p>
-  <form method="post" action="/admin/remote">
-    <label><input type="checkbox" name="remote_enabled" style="width:auto"
-           {{ 'checked' if remote.remote_enabled }}> Enable periodic reports</label>
-    <label>Report URL (e.g. https://your-site.example/api/heartbeat)</label>
-    <input name="remote_url" value="{{ remote.remote_url }}" style="width:100%">
-    <label>Shared secret key {{ '(set — blank keeps it)' if remote.remote_key else '(not set)' }}</label>
-    <input name="remote_key" type="password">
-    <label>Interval (seconds, min 60)</label>
-    <input name="remote_interval_s" type="number" min="60" value="{{ remote.remote_interval_s }}">
-    <label>Device ID (blank = hostname "{{ device_id_default }}") — tells your machines apart</label>
-    <input name="device_id" value="{{ remote.device_id }}">
-    <div style="margin-top:12px">
-      <button>Save</button>
-      <button type="button" onclick="sendNow(this)">Send test report now</button>
-      <span id="remote-status" style="margin-left:8px">
-        {% if remote_last.at %}
-          <span class="badge {{ 'ok' if remote_last.ok else 'bad' }}">
-            last push: {{ remote_last.detail }}</span>
-        {% else %}<span class="muted">no report sent yet</span>{% endif %}
-      </span>
+  <section class="card">
+    <h2>Coin simulator</h2>
+    <div class="notice warn">
+      No GPIO detected — the coin slot is running mocked, so real coins will
+      not be counted. These buttons fake an insert for testing.
     </div>
-  </form>
-
-  <h2>Vouchers &amp; data</h2>
-  <p class="muted">{{ vouchers.unused }} unused · {{ vouchers.used }} used · {{ vouchers.total }} total —
-     <a href="/admin/vouchers" style="color:var(--accent)">manage codes</a></p>
-  <p style="margin-top:8px">
-    <button type="button" onclick="location='/admin/backup'">Download config backup</button>
-    <button type="button" onclick="location='/admin/backup?sales=1'">Backup incl. sales</button>
-  </p>
-  <p class="muted" style="margin-top:4px">
-    Downloaded backups leave out the session key and your remote-dashboard key.
-    They <b>do</b> contain PPPoE passwords — CHAP needs those in the clear, so
-    keep the file private.
-  </p>
-  <form method="post" action="/admin/restore" enctype="multipart/form-data" style="margin-top:8px">
-    <input type="file" name="file" accept="application/json"> <button>Restore backup</button>
-  </form>
-
-  {% if watch and watch.at %}
-  <p class="muted" style="margin-top:16px">
-    🩺 watchdog: WAN {{ 'up' if watch.wan else 'DOWN (x%d)' % watch.wan_fails }}
-    {%- for svc, ok in watch.services.items() %} · {{ svc }} {{ 'ok' if ok else '⚠ restarted' }}{% endfor %}
-  </p>
+    <div class="actions">
+      {% for p in [1, 5, 10, 20] %}
+      <form class="inline" method="post" action="/admin/simulate-coin">
+        <input type="hidden" name="pesos" value="{{ p }}"><button class="ghost">+ ₱{{ p }}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </section>
   {% endif %}
 
-  <p class="muted" style="margin-top:20px">
+  <section class="card">
+    <h2>Active clients</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>MAC</th><th>Remaining</th><th>State</th><th></th></tr></thead>
+        <tbody>
+        {% for s in active %}
+          <tr>
+            <td class="mac">{{ s.mac }}</td>
+            <td class="num">{{ '%d:%02d' % (s.remaining // 3600, s.remaining % 3600 // 60) }}</td>
+            <td><span class="badge {{ 'warn' if s.paused else 'ok' }}">{{ 'paused' if s.paused else 'online' }}</span></td>
+            <td style="text-align:right">
+              <form class="inline" method="post" action="/admin/kick">
+                <input type="hidden" name="mac" value="{{ s.mac }}">
+                <button class="danger tiny">Kick</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">Nobody connected right now</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Recent sales</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>When</th><th>MAC</th><th class="num">₱</th><th class="num">Minutes</th></tr></thead>
+        <tbody>
+        {% for s in sales.recent %}
+          <tr><td>{{ s.when }}</td><td class="mac">{{ s.mac }}</td>
+              <td class="num">{{ s.pesos }}</td><td class="num">{{ s.minutes }}</td></tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">No sales yet</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ coin -> time ----- -->
+  <section class="card">
+    <h2>Coin → time</h2>
+    <p class="muted">
+      What each amount buys. Coins inserted in one go add up, so five ₱1 coins
+      get the ₱5 time. Anything not listed falls back to the per-peso rate.
+    </p>
+
+    <form method="post" action="/admin/settings" onsubmit="return packTiers()">
+      <label>Denominations</label>
+      <div class="rates" id="rates"></div>
+      <div class="rate-empty" id="ratesEmpty" hidden>
+        No denominations set — every amount uses the fallback rate below.
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="addRate('', '')">+ Add denomination</button>
+      </div>
+      <input type="hidden" name="bonus_tiers" id="tiersJson">
+
+      <label for="mpp">Fallback rate — minutes per ₱1</label>
+      <input id="mpp" name="minutes_per_peso" type="number" min="1" value="{{ rate }}">
+      <p class="hint" id="mppHint"></p>
+
+      <label for="hn">Hotspot name</label>
+      <input id="hn" name="hotspot_name" value="{{ name }}">
+
+      <label for="pw">New admin password <span style="font-weight:400">(blank = keep current)</span></label>
+      <input id="pw" name="admin_password" type="password" autocomplete="new-password">
+
+      <div class="actions"><button>Save settings</button></div>
+    </form>
+  </section>
+
+  <!-- ------------------------------------------------ remote ----------- -->
+  <section class="card">
+    <h2>Remote monitoring</h2>
+    <p class="muted">
+      Pushes a signed report (earnings, active clients, health) to your own
+      website every few minutes, so you can check takings from anywhere. The
+      ready-made receiver is in <code>server/</code>. Coin and relay pins live
+      on the <a href="/admin/diag">Diagnostics</a> page.
+    </p>
+    <form method="post" action="/admin/remote">
+      <label class="check">
+        <input type="checkbox" name="remote_enabled" {{ 'checked' if remote.remote_enabled }}>
+        <span>Enable periodic reports</span>
+      </label>
+
+      <label for="ru">Report URL</label>
+      <input id="ru" name="remote_url" value="{{ remote.remote_url }}"
+             placeholder="https://your-site.example/api/heartbeat">
+
+      <label for="rk">Shared secret key
+        <span style="font-weight:400">{{ '(set — blank keeps it)' if remote.remote_key else '(not set)' }}</span></label>
+      <input id="rk" name="remote_key" type="password" autocomplete="off">
+
+      <label for="ri">Interval (seconds, minimum 60)</label>
+      <input id="ri" name="remote_interval_s" type="number" min="60" value="{{ remote.remote_interval_s }}">
+
+      <label for="di">Device ID <span style="font-weight:400">(blank = hostname "{{ device_id_default }}")</span></label>
+      <input id="di" name="device_id" value="{{ remote.device_id }}">
+      <p class="hint">Give each machine its own ID or they all report as one row.</p>
+
+      <div class="actions">
+        <button>Save</button>
+        <button type="button" class="ghost" onclick="sendNow(this)">Send test report</button>
+        <span id="remote-status">
+          {% if remote_last.at %}
+            <span class="badge {{ 'ok' if remote_last.ok else 'bad' }}">{{ remote_last.detail }}</span>
+          {% else %}<span class="muted">no report sent yet</span>{% endif %}
+        </span>
+      </div>
+    </form>
+  </section>
+
+  <!-- ------------------------------------------------ data ------------- -->
+  <section class="card">
+    <h2>Vouchers &amp; backup</h2>
+    <p class="muted">
+      {{ vouchers.unused }} unused · {{ vouchers.used }} used · {{ vouchers.total }} total —
+      <a href="/admin/vouchers">manage codes</a>
+    </p>
+    <div class="actions">
+      <a class="btn ghost" href="/admin/backup">Download config backup</a>
+      <a class="btn ghost" href="/admin/backup?sales=1">Backup incl. sales</a>
+    </div>
+    <p class="hint">
+      Backups leave out the session key and your remote-dashboard key. They
+      <b>do</b> contain PPPoE passwords — CHAP needs those in the clear — so
+      keep the file private.
+    </p>
+    <form method="post" action="/admin/restore" enctype="multipart/form-data">
+      <label for="rf">Restore from a backup file</label>
+      <input id="rf" type="file" name="file" accept="application/json">
+      <div class="actions"><button class="ghost">Restore backup</button></div>
+    </form>
+  </section>
+
+  <div class="footer">
+    {% if watch and watch.at %}
+      🩺 watchdog: WAN {{ 'up' if watch.wan else 'DOWN (x%d)' % watch.wan_fails }}
+      {%- for svc, ok in watch.services.items() %} · {{ svc }} {{ 'ok' if ok else '⚠ restarted' }}{% endfor %}
+      <br>
+    {% endif %}
     v{{ sys.version }} · uptime {{ sys.uptime_s // 3600 }}h{{ sys.uptime_s % 3600 // 60 }}m
     {%- if sys.cpu_temp_c is defined %} · CPU {{ sys.cpu_temp_c }}°C{% endif %}
     {%- if sys.mem_free_mb is defined %} · {{ sys.mem_free_mb }} MB free{% endif %}
-  </p>
+  </div>
+{% endblock %}
 
+{% block script %}
 <script>
-const TIERS = {{ tiers }};
-function addTier(p, m) {
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td><input type="number" min="1" class="t-p" value="${p}" style="width:90px"></td>
-    <td><input type="number" min="1" class="t-m" value="${m}" style="width:100px"></td>
-    <td><button type="button" onclick="this.closest('tr').remove()">✕</button></td>`;
-  document.getElementById('tierTable').appendChild(tr);
+// The |tojson filter is load-bearing. Interpolated raw, Jinja HTML-escapes the
+// value and every quote in this object turns into a numeric entity -- which is
+// a JavaScript syntax error, and takes every function below it down with it.
+const TIERS = {{ tiers | tojson }};
+
+function fmtDuration(mins) {
+  if (!mins || mins < 1) return '';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h ? (m ? h + 'h ' + m + 'm' : h + 'h') : m + 'm';
 }
-Object.entries(TIERS).sort((a, b) => a[0] - b[0]).forEach(([p, m]) => addTier(p, m));
+
+function updateDerived(row) {
+  const p = parseInt(row.querySelector('.t-p').value, 10);
+  const m = parseInt(row.querySelector('.t-m').value, 10);
+  const out = row.querySelector('.derived');
+  if (!p || !m) { out.textContent = 'Enter an amount and the minutes it buys.'; return; }
+  out.innerHTML = '₱' + p + ' buys <b>' + fmtDuration(m) + '</b>' +
+                  ' &middot; ' + (m / p).toFixed(1) + ' min per ₱1' +
+                  ' &middot; ₱' + (p / (m / 60)).toFixed(2) + ' per hour';
+}
+
+function addRate(p, m) {
+  const row = document.createElement('div');
+  row.className = 'rate-row';
+  row.innerHTML =
+    '<span class="peso-sign">₱</span>' +
+    '<input type="number" min="1" class="t-p" value="' + p + '" placeholder="5" aria-label="Amount in pesos">' +
+    '<span class="arrow">&rarr;</span>' +
+    '<input type="number" min="1" class="t-m" value="' + m + '" placeholder="120" aria-label="Minutes">' +
+    '<button type="button" class="danger tiny" aria-label="Remove">&#10005;</button>' +
+    '<div class="derived"></div>';
+  row.querySelector('button').addEventListener('click', function () {
+    row.remove(); refreshEmpty();
+  });
+  row.querySelectorAll('input').forEach(function (i) {
+    i.addEventListener('input', function () { updateDerived(row); });
+  });
+  document.getElementById('rates').appendChild(row);
+  updateDerived(row);
+  refreshEmpty();
+  return row;
+}
+
+function refreshEmpty() {
+  const any = document.querySelectorAll('#rates .rate-row').length > 0;
+  document.getElementById('ratesEmpty').hidden = any;
+}
+
+function updateMppHint() {
+  const v = parseInt(document.getElementById('mpp').value, 10);
+  document.getElementById('mppHint').textContent =
+    v ? 'An unlisted ₱1 buys ' + fmtDuration(v) + ', ₱10 buys ' + fmtDuration(v * 10) + '.' : '';
+}
+
 function packTiers() {
   const o = {};
-  document.querySelectorAll('#tierTable .t-p').forEach(p => {
-    const m = p.closest('tr').querySelector('.t-m');
-    if (p.value && m.value) o[parseInt(p.value)] = parseInt(m.value);
+  document.querySelectorAll('#rates .rate-row').forEach(function (row) {
+    const p = row.querySelector('.t-p').value, m = row.querySelector('.t-m').value;
+    if (p && m) o[parseInt(p, 10)] = parseInt(m, 10);
   });
   document.getElementById('tiersJson').value = JSON.stringify(o);
   return true;
 }
 
+Object.entries(TIERS).sort(function (a, b) { return a[0] - b[0]; })
+  .forEach(function (e) { addRate(e[0], e[1]); });
+refreshEmpty();
+document.getElementById('mpp').addEventListener('input', updateMppHint);
+updateMppHint();
+
 async function sendNow(btn) {
-  btn.disabled = true; btn.textContent = 'Sending…';
+  btn.disabled = true; btn.textContent = 'Sending...';
   try {
-    const r = await (await fetch('/admin/remote-test', {method:'POST'})).json();
+    const r = await (await fetch('/admin/remote-test', {method: 'POST'})).json();
     document.getElementById('remote-status').innerHTML =
-      `<span class="badge ${r.ok ? 'ok' : 'bad'}">${r.detail}</span>`;
+      '<span class="badge ' + (r.ok ? 'ok' : 'bad') + '">' + r.detail + '</span>';
   } catch (e) {
-    document.getElementById('remote-status').innerHTML = `<span class="badge bad">${e}</span>`;
+    document.getElementById('remote-status').innerHTML = '<span class="badge bad">' + e + '</span>';
   }
-  btn.disabled = false; btn.textContent = 'Send test report now';
+  btn.disabled = false; btn.textContent = 'Send test report';
 }
-// stamp the CSRF token into every admin POST form
-document.querySelectorAll('form').forEach(f => {
-  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
-    const i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'csrf'; i.value = '{{ csrf }}';
-    f.appendChild(i);
-  }
-});
 </script>
-</body>
-</html>
+{% endblock %}

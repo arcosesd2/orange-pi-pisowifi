@@ -1,108 +1,114 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ name }} — Devices</title>
+{% extends "_admin_base.html" %}
+{% block title %}Devices{% endblock %}
+
+{% block head %}
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --txt:#e2e8f0; }
-  * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         padding:24px 16px; max-width:760px; margin:0 auto; }
-  h1 { color:var(--accent); font-size:1.3rem; margin-bottom:16px; }
-  h2 { font-size:1rem; color:#94a3b8; margin:20px 0 8px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; }
-  td, th { padding:7px 9px; border-bottom:1px solid #334155; font-size:.85rem; text-align:left; }
-  input, select, button { padding:8px 12px; border-radius:8px; border:1px solid #475569;
-                  background:#0f172a; color:var(--txt); font-size:.95rem; }
-  button { background:var(--accent); color:#111; border:0; font-weight:700; cursor:pointer; }
-  form.inline { display:inline; }
-  label { display:block; margin:8px 0 4px; font-size:.8rem; color:#94a3b8; }
-  nav a { color:#94a3b8; margin-right:14px; text-decoration:none; font-size:.9rem; }
-  nav a.here { color:var(--accent); font-weight:700; }
-  nav { margin-bottom:16px; }
-  code { font-family:ui-monospace,monospace; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
-  .muted { color:#94a3b8; font-size:.8rem; }
-</style>
-</head>
-<body>
-  <h1>📇 {{ name }} — Devices</h1>
-  <nav>
-    <a href="/admin">Dashboard</a>
-    <a href="/admin/vouchers">Vouchers</a>
-    <a class="here" href="/admin/devices">Devices</a>
-    <a href="/admin/audit">Audit</a>
-    <a href="/admin/diag">Diagnostics</a>
-    <a href="/admin/logout">Logout</a>
-  </nav>
-
-  <p class="muted">
-    <b>Whitelist</b> = always-on free internet (your phone, CCTV, POS) — these also get
-    full access to this box (SSH/admin). <b>Blacklist</b> = fully blocked.
-  </p>
-  <p class="muted" style="background:#78350f33;border:1px solid #78350f;border-radius:9px;
-            padding:10px 12px;color:#fde68a;line-height:1.5">
-    <b>Adding the first whitelist entry locks this panel down.</b> Until one exists,
-    admin is reachable from the customer network — after that, only whitelisted
-    devices, the machine itself, or a private path like Tailscale can open it.
-    Whitelist your own phone first. To recover a lockout, set
-    <code>"admin_lan_access": "any"</code> in <code>/etc/pisowifi/config.json</code>
-    and restart the service.
-  </p>
-
-  <h2>Add a device</h2>
-  <form method="post" action="/admin/devices/add">
-    <div class="row">
-      <div><label>MAC address</label><input name="mac" placeholder="aa:bb:cc:dd:ee:ff" style="width:180px" required></div>
-      <div><label>Label</label><input name="label" placeholder="e.g. CCTV" style="width:140px"></div>
-      <div><label>List</label>
-        <select name="kind">
-          <option value="white">Whitelist (free)</option>
-          <option value="black">Blacklist (ban)</option>
-        </select>
-      </div>
-      <div><label>Speed (whitelist only)</label>
-        <select name="speed">
-          <option value="">(unlimited)</option>
-          {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><button>Add</button></div>
-    </div>
-  </form>
-
-  <h2>Whitelist — free devices</h2>
-  <table>
-    <tr><th>MAC</th><th>Label</th><th>Speed</th><th></th></tr>
-    {% for d in whitelist %}
-    <tr>
-      <td><code>{{ d.mac }}</code></td><td>{{ d.label or '' }}</td><td>{{ d.speed or 'unlimited' }}</td>
-      <td><form class="inline" method="post" action="/admin/devices/remove">
-        <input type="hidden" name="mac" value="{{ d.mac }}"><button>Remove</button></form></td>
-    </tr>
-    {% else %}<tr><td colspan="4">None</td></tr>{% endfor %}
-  </table>
-
-  <h2>Blacklist — banned devices</h2>
-  <table>
-    <tr><th>MAC</th><th>Label</th><th></th></tr>
-    {% for d in blacklist %}
-    <tr>
-      <td><code>{{ d.mac }}</code></td><td>{{ d.label or '' }}</td>
-      <td><form class="inline" method="post" action="/admin/devices/remove">
-        <input type="hidden" name="mac" value="{{ d.mac }}"><button>Remove</button></form></td>
-    </tr>
-    {% else %}<tr><td colspan="3">None</td></tr>{% endfor %}
-  </table>
-<script>
-document.querySelectorAll('form').forEach(f => {
-  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
-    const i = document.createElement('input');
-    i.type = 'hidden'; i.name = 'csrf'; i.value = '{{ csrf }}';
-    f.appendChild(i);
+  .add-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px 12px;
+    align-items: end;
   }
-});
-</script>
-</body>
-</html>
+  .add-grid label { margin-top: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+  {% if not whitelist %}
+  <div class="notice warn">
+    <b>Adding the first whitelist entry locks this panel down.</b>
+    Until one exists, admin is reachable from the customer network — after
+    that, only whitelisted devices, the machine itself, or a private path like
+    Tailscale can open it. <b>Whitelist the device you are reading this on
+    first.</b> To recover a lockout, set <code>"admin_lan_access": "any"</code>
+    in <code>/etc/pisowifi/config.json</code> and restart the service.
+  </div>
+  {% endif %}
+
+  <section class="card">
+    <h2>Add a device</h2>
+    <p class="muted">
+      <b>Whitelist</b> — always-on free internet (your phone, CCTV, POS). These
+      also get full access to this box, including SSH and admin.
+      <b>Blacklist</b> — fully blocked.
+    </p>
+    <form method="post" action="/admin/devices/add">
+      <div class="add-grid">
+        <div><label for="mac">MAC address</label>
+          <input id="mac" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required></div>
+        <div><label for="lbl">Label</label>
+          <input id="lbl" name="label" placeholder="e.g. my phone"></div>
+        <div><label for="kind">List</label>
+          <select id="kind" name="kind">
+            <option value="white">Whitelist — free</option>
+            <option value="black">Blacklist — ban</option>
+          </select></div>
+        <div><label for="spd">Speed (whitelist only)</label>
+          <select id="spd" name="speed">
+            <option value="">unlimited</option>
+            {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="actions"><button>Add device</button></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Whitelist</h2>
+      <div class="spacer"></div>
+      <span class="badge ok">{{ whitelist|length }} free</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>MAC</th><th>Label</th><th>Speed</th><th></th></tr></thead>
+        <tbody>
+        {% for d in whitelist %}
+          <tr>
+            <td class="mac">{{ d.mac }}</td>
+            <td>{{ d.label or '—' }}</td>
+            <td>{{ d.speed or 'unlimited' }}</td>
+            <td style="text-align:right">
+              <form class="inline" method="post" action="/admin/devices/remove">
+                <input type="hidden" name="mac" value="{{ d.mac }}">
+                <button class="danger tiny">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="empty">No whitelisted devices</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Blacklist</h2>
+      <div class="spacer"></div>
+      <span class="badge bad">{{ blacklist|length }} banned</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>MAC</th><th>Label</th><th></th></tr></thead>
+        <tbody>
+        {% for d in blacklist %}
+          <tr>
+            <td class="mac">{{ d.mac }}</td>
+            <td>{{ d.label or '—' }}</td>
+            <td style="text-align:right">
+              <form class="inline" method="post" action="/admin/devices/remove">
+                <input type="hidden" name="mac" value="{{ d.mac }}">
+                <button class="danger tiny">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">No banned devices</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

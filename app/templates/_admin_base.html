@@ -1,0 +1,71 @@
+{#
+  Shared layout for every admin page.
+
+  Pages provide:
+    {% block title %}   short tab name, e.g. "Vouchers"
+    {% block content %} the page body
+    {% block script %}  page JavaScript (optional)
+
+  The nav highlights itself from request.path, so adding a page means adding
+  one line to TABS below rather than editing eight templates.
+#}
+{%- set TABS = [
+  ('/admin',           'Dashboard'),
+  ('/admin/vouchers',  'Vouchers'),
+  ('/admin/devices',   'Devices'),
+  ('/admin/branding',  'Branding'),
+  ('/admin/schedules', 'Schedule'),
+  ('/admin/pppoe',     'PPPoE'),
+  ('/admin/audit',     'Audit'),
+  ('/admin/diag',      'Diagnostics'),
+] -%}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ name }} — {% block title %}Admin{% endblock %}</title>
+<link rel="stylesheet" href="/static/admin.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div style="min-width:0">
+        <div class="brand-sub">PisoWiFi admin</div>
+        <h1 class="brand">{{ name }}</h1>
+      </div>
+      <div class="spacer"></div>
+      <a class="logout" href="/admin/logout">Log out</a>
+    </div>
+    <nav class="tabs">
+      {%- for href, label in TABS %}
+      <a href="{{ href }}"{% if request.path == href %} class="here"{% endif %}>{{ label }}</a>
+      {%- endfor %}
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+{#
+  CSRF stamping lives in its own <script> so that a syntax error in a page
+  script can never disable it. That is not hypothetical: a JSON value rendered
+  without |tojson used to break the dashboard's only script block, which took
+  this loop down with it and silently made every POST on the page fail the
+  CSRF check -- settings, rates, kick, restore, all of them, with no error
+  shown to the operator.
+#}
+<script>
+document.querySelectorAll('form').forEach(function (f) {
+  if ((f.method || '').toLowerCase() === 'post' && !f.querySelector('[name=csrf]')) {
+    var i = document.createElement('input');
+    i.type = 'hidden'; i.name = 'csrf'; i.value = {{ csrf | tojson }};
+    f.appendChild(i);
+  }
+});
+</script>
+{% block script %}{% endblock %}
+</body>
+</html>

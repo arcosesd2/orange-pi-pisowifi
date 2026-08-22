@@ -13,12 +13,58 @@
 # the board if it isn't there yet (that is the one time you type the root
 # password you set in the Armbian first-boot profile).
 param(
-    [Parameter(Mandatory = $true)][string]$Target,
+    [string]$Target,
     [string]$User = "root",
     [switch]$Seal,
     [switch]$ZeroFill
 )
 $ErrorActionPreference = "Stop"
+
+# ---------------------------------------------------------------------------
+# Find the board if no IP was given
+# ---------------------------------------------------------------------------
+# The board takes a DHCP lease from your router and there is no way to know the
+# address in advance, so without this you have to go digging in the router's
+# admin page. Sweep the local /24 for anything answering on SSH instead.
+function Find-Board {
+    $me = Get-NetIPAddress -AddressFamily IPv4 |
+          Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+          Select-Object -First 1
+    if (-not $me) { throw "No usable network interface found." }
+    $prefix = ($me.IPAddress -split '\.')[0..2] -join '.'
+    Write-Host "==> Scanning $prefix.0/24 for boards (SSH)…" -ForegroundColor Cyan
+
+    $gw = (Get-NetRoute -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+           ForEach-Object { $_.NextHop }) -join " "
+    $tasks = @()
+    foreach ($i in 1..254) {
+        $ip = "$prefix.$i"
+        if ($ip -eq $me.IPAddress) { continue }
+        $c = [System.Net.Sockets.TcpClient]::new()
+        $tasks += [pscustomobject]@{ IP = $ip; Client = $c; Async = $c.BeginConnect($ip, 22, $null, $null) }
+    }
+    Start-Sleep -Milliseconds 1200
+    $found = @()
+    foreach ($t in $tasks) {
+        if ($t.Async.IsCompleted -and $t.Client.Connected) { $found += $t.IP }
+        try { $t.Client.Close() } catch {}
+    }
+    # The router answers SSH on plenty of home setups; it is never the board.
+    $found = $found | Where-Object { $gw -notmatch [regex]::Escape($_) }
+
+    if ($found.Count -eq 0) {
+        throw "No SSH host found on $prefix.0/24. Give it another minute to boot, check the ethernet cable, or pass -Target <ip>."
+    }
+    if ($found.Count -eq 1) {
+        Write-Host "    found $($found[0])" -ForegroundColor Green
+        return $found[0]
+    }
+    Write-Host "    more than one SSH host answered:" -ForegroundColor Yellow
+    $found | ForEach-Object { Write-Host "      $_" }
+    throw "Pick the board and re-run with -Target <ip>."
+}
+
+if (-not $Target) { $Target = Find-Board }
 $src  = $PSScriptRoot
 $dest = "$User@$Target"
 $key  = "$env:USERPROFILE\.ssh\id_ed25519"

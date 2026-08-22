@@ -85,7 +85,18 @@ if (-not (Test-Path "$key.pub")) {
     ssh-keygen -t ed25519 -N '""' -f $key | Out-Null
 }
 
-ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $dest "true" 2>$null
+# A freshly flashed board generates its own host keys, and DHCP hands out
+# addresses that other machines used before it — so a "HOST IDENTIFICATION HAS
+# CHANGED" warning here is the normal case, not an attack, and it blocks the
+# connection outright (accept-new only covers unknown hosts, not changed ones).
+# Drop the stale record for this address only, and say so.
+$probe = ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $dest "true" 2>&1
+if ($probe -match "REMOTE HOST IDENTIFICATION HAS CHANGED") {
+    Warn "known_hosts has an old key for $Target (that address was used by another"
+    Warn "machine before this board). Removing just that entry."
+    ssh-keygen -R $Target 2>&1 | Out-Null
+    $probe = ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new $dest "true" 2>&1
+}
 if ($LASTEXITCODE -ne 0) {
     Say "Installing your SSH key on the board"
     Write-Host "    Type the ROOT password from your Armbian first-boot profile." -ForegroundColor Yellow

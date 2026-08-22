@@ -20,7 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw "No key-based SSH access to $dest — install y
 
 Write-Host "==> Copying project"
 ssh $dest 'rm -rf /root/pisowifi.new && mkdir -p /root/pisowifi.new'
-scp -r "$src\app" "$src\network" "$src\systemd" "$src\install.sh" "$src\README.md" "${dest}:/root/pisowifi.new/"
+scp -r "$src\app" "$src\network" "$src\systemd" "$src\install.sh" "$src\seal.sh" "$src\README.md" "${dest}:/root/pisowifi.new/"
 if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 
 # swap into place + strip Windows line endings

@@ -37,12 +37,16 @@ DB_PATH="$(python3 -c "import json;print(json.load(open('/etc/pisowifi/config.js
 cat <<EOF
 
 This will WIPE this machine and power it off:
-  * sales database, wallets, vouchers, audit log   $( [ "$KEEP_DB" = 1 ] && echo "(KEPT: --keep-db)" )
+  * sales, sessions, wallets, vouchers, audit log, PPPoE accounts   $( [ "$KEEP_DB" = 1 ] && echo "(KEPT: --keep-db)" )
+  * the device whitelist (or card N would 403 its own owner)
   * admin password (the new card forces a fresh one at first login)
   * SSH host keys, machine-id, hostname, logs, DHCP leases
   * the rendered nftables/dnsmasq/hostapd configs (regenerated at every boot)
 
-Kept: the software, your rates, hotspot name, branding, and feature toggles.
+KEPT — this is what a golden image is for:
+  * coin/relay GPIO setup: pin, edge, debounce, denominations, pulse timing
+  * rates, bonus tiers, hotspot name, speed profiles
+  * branding (logo/banner/colour), schedules, watchdog, feature toggles
 
 EOF
 
@@ -62,10 +66,44 @@ systemctl stop pisowifi dnsmasq hostapd pppoe-server 2>/dev/null || true
 # takings and per-machine state
 # ---------------------------------------------------------------------------
 if [ "$KEEP_DB" = 1 ]; then
-    echo "==> Keeping the database (--keep-db)"
+    echo "==> Keeping the database untouched (--keep-db)"
 else
-    echo "==> Removing the database (sales, sessions, vouchers, wallets, audit)"
-    rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
+    echo "==> Clearing takings and identity, keeping your configuration"
+    python3 - "$DB_PATH" <<'PY'
+import os, sqlite3, sys
+
+db = sys.argv[1]
+if not os.path.exists(db):
+    print("    (no database yet — nothing to clear)")
+    raise SystemExit(0)
+
+# Everything the operator tuned on this machine lives in the settings table,
+# because that is where the admin UI writes: rates, bonus tiers, hotspot name,
+# branding, schedules, feature toggles — and the coin/relay GPIO setup. That
+# configuration IS the value of a golden image, so it stays. Deleting the whole
+# database here would hand every cloned card the config.json defaults instead,
+# including the default coin pin, which is exactly the wrong outcome.
+IDENTITY = ("admin_pw_hash", "admin_pw_default", "SECRET_KEY", "device_id")
+CUSTOMER = ("sales", "sessions", "vouchers", "devices", "audit",
+            "trials", "wallets", "pppoe_accounts")
+
+con = sqlite3.connect(db)
+con.isolation_level = None          # autocommit — VACUUM cannot run in a transaction
+for t in CUSTOMER:
+    try:
+        con.execute("DELETE FROM %s" % t)
+    except sqlite3.OperationalError:
+        pass                        # table absent in this schema version
+for k in IDENTITY:
+    con.execute("DELETE FROM settings WHERE key=?", (k,))
+kept = con.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
+con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+con.execute("VACUUM")
+con.close()
+print("    kept %d configuration settings (rates, pins, branding, toggles)" % kept)
+print("    cleared sales, sessions, vouchers, devices, wallets, audit, PPPoE")
+PY
+    rm -f "$DB_PATH-wal" "$DB_PATH-shm"
     rm -rf "$(dirname "$DB_PATH")/backups"
 fi
 rm -f /var/lib/pisowifi/.provisioned

@@ -221,7 +221,16 @@ if os.path.exists(src):
                  "        devices = { %s, %s }\n"
                  "    }" % (lan_dev, wan))
         offl = "        ip protocol { tcp, udp } flow add @ft"
-    s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt).replace("#@OFFLOAD@", offl)
+    # Bench bring-up escape hatch. Without it the uplink is sealed the instant
+    # the installer finishes, so nothing can verify the machine it just built.
+    wanmgmt = ""
+    if cfg.get("wan_management"):
+        port = int(cfg.get("portal_port") or 8080)
+        wanmgmt = ("        iifname %s tcp dport { 22, %d } accept\n"
+                   "        iifname %s icmp type echo-request accept"
+                   % (wan, port, wan))
+    s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt) \
+         .replace("#@OFFLOAD@", offl).replace("#@WAN_MGMT@", wanmgmt)
     write("/etc/nftables.conf", s)
 
 # -- dnsmasq ----------------------------------------------------------------

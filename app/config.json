@@ -3,6 +3,8 @@
 
   "_comment_interfaces": "lan_if/wan_if are rewritten at every boot by pisowifi-detect while auto_detect_interfaces is true; set it false to pin them.",
   "auto_detect_interfaces": true,
+  "_comment_wan_management": "true keeps SSH/portal/ping reachable on the UPLINK side. Bench bring-up only; seal.sh forces it false.",
+  "wan_management": false,
   "lan_if": "eth1",
   "wan_if": "eth0",
   "lan_vlan": 0,

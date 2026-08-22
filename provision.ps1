@@ -132,7 +132,11 @@ if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 ssh $dest 'rm -rf /root/pisowifi && mv /root/pisowifi.new /root/pisowifi && find /root/pisowifi -type f -exec sed -i "s/\r$//" {} +'
 
 Say "Running the installer (this pulls packages -- a few minutes)"
-ssh $dest "cd /root/pisowifi && bash install.sh --yes"
+# --wan-management keeps SSH reachable from the uplink. Without it the
+# firewall seals this interface the moment nftables loads, and every check
+# below times out against a board that is actually fine. seal.sh turns it
+# back off, so it never reaches a master image.
+ssh $dest "cd /root/pisowifi && bash install.sh --yes --wan-management"
 if ($LASTEXITCODE -ne 0) { throw "installer failed -- see the output above" }
 
 # ---------------------------------------------------------------------------
@@ -172,7 +176,11 @@ if ($svc -match "inactive|failed") {
     Bad "services: $svc"
 } else { Ok "services: $svc" }
 
-$http = (ssh $dest "for i in \$(seq 1 10); do c=\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/); [ \$c = 200 ] && break; sleep 1; done; echo \$c") -join ""
+# Single-quoted: PowerShell expands $( ) inside double quotes, so a double-quoted
+# version of this ran seq and curl on Windows instead of sending them to the
+# board. Backslash is not a PowerShell escape either -- only the backtick is.
+$portalCmd = 'for i in $(seq 1 10); do c=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/); [ "$c" = 200 ] && break; sleep 1; done; echo "$c"'
+$http = (ssh $dest $portalCmd) -join ""
 if ($http -ne "200") {
     $problems += "The portal did not answer (HTTP $http)."
     Bad "portal HTTP $http"
@@ -193,6 +201,9 @@ if ($problems.Count -gt 0) {
 Write-Host "MACHINE #1 IS UP." -ForegroundColor Green
 Write-Host ""
 Write-Host "  Admin:  http://$Target`:8080/admin   (password was printed above)"
+Write-Host ""
+Warn "Bench mode: SSH and the portal are open on the uplink interface."
+Warn "That is how this script can still reach the board. -Seal clears it."
 Write-Host ""
 Write-Host "Still to do by hand -- neither can be automated:"
 Write-Host "  1. Train the coin acceptor, then verify with real coins in"

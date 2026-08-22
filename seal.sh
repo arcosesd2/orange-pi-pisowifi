@@ -117,6 +117,8 @@ import json
 p = "/etc/pisowifi/config.json"
 c = json.load(open(p))
 c["admin_password"] = "changeme"
+# Bench-only. A master image must never ship with the uplink open.
+c["wan_management"] = False
 # device_id falls back to the hostname, which first boot makes unique per board.
 c["device_id"] = ""
 json.dump(c, open(p, "w"), indent=2)

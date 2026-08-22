@@ -19,6 +19,7 @@
 set -euo pipefail
 
 LAN_IF=""; WAN_IF=""; GW_IP="10.0.0.1"; USE_HOSTAPD=""; ASSUME_YES=0; LAN_VLAN=""
+WAN_MGMT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -28,6 +29,8 @@ while [ $# -gt 0 ]; do
         --vlan)    LAN_VLAN="$2";    shift 2 ;;
         --hostapd) USE_HOSTAPD="$2"; shift 2 ;;
         --wired)   USE_HOSTAPD=0;    shift ;;   # kept for compatibility
+        --wan-management)   WAN_MGMT=1; shift ;;   # keep SSH open on the uplink
+        --no-wan-management) WAN_MGMT=0; shift ;;
         --yes|-y)  ASSUME_YES=1;     shift ;;
         *) echo "unknown option: $1"; exit 1 ;;
     esac
@@ -119,9 +122,9 @@ fi
 
 # Record the operator's choices. Everything else (which NIC is which) is left
 # for the boot-time detector to fill in.
-python3 - "$AUTO" "$GW_IP" "$LAN_VLAN" "$LAN_IF" "$WAN_IF" "${USE_HOSTAPD:-}" <<'PY'
+python3 - "$AUTO" "$GW_IP" "$LAN_VLAN" "$LAN_IF" "$WAN_IF" "${WAN_MGMT:-}" <<'PY'
 import json, sys
-auto, gw, vlan, lan, wan, hostapd = sys.argv[1:7]
+auto, gw, vlan, lan, wan, wanmgmt = sys.argv[1:7]
 p = "/etc/pisowifi/config.json"
 c = json.load(open(p))
 c["auto_detect_interfaces"] = (auto == "1")
@@ -129,6 +132,8 @@ c["gateway_ip"] = gw
 c["lan_vlan"] = int(vlan or 0)
 if auto != "1":
     c["lan_if"], c["wan_if"] = lan, wan
+if wanmgmt != "":
+    c["wan_management"] = (wanmgmt == "1")
 json.dump(c, open(p, "w"), indent=2)
 PY
 chmod 600 /etc/pisowifi/config.json

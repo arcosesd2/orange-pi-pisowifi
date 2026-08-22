@@ -52,6 +52,11 @@ DEFAULTS = {
     # config.json on every boot (pisowifi-detect), which is what lets one
     # SD card image run on any board. Set it false to pin them by hand.
     "auto_detect_interfaces": True,
+    # Keep SSH/portal/ping open on the UPLINK interface. The firewall
+    # otherwise drops everything arriving there, which is right for a
+    # deployed machine and wrong for a bench board you still have to
+    # finish building. seal.sh forces this back to false.
+    "wan_management": False,
     # Default topology: eth0 = internet uplink (onboard), eth1 = antenna/LAN
     # (USB-ethernet). Set lan_if to wlan0 only for the Pi-broadcasts-its-own-WiFi
     # (hostapd) topology.

@@ -151,6 +151,28 @@ lockout, admin gating of CSV exports, rate limiting, and the whole admin
 surface. Concurrency: 50 customers in ~1.6 s, no thread errors, no duplicate
 sessions, 200 concurrent status polls clean.
 
+### Audit recommendations closed (same day)
+
+Everything from the audit that software could close:
+
+- **Unclaimed coins are visible, not just held.** Running tally on the
+  dashboard plus the claimable pot; a climbing figure is the signal the relay
+  is not gating the acceptor.
+- **Dashboard warns when no relay pin is set** -- the only defence against F3.
+- **Hold policy editable from Diagnostics**, with 0 (discard) allowed and its
+  cost spelled out, instead of being config-file-only on a box with no SSH.
+- **provision.ps1 runs the suite before uploading** and refuses a failing
+  build (`-SkipTests` to override).
+- **seal.sh --lock-ssh** disables password auth, since /etc/shadow is cloned
+  onto every card. Refuses without an authorized_keys, which would otherwise
+  produce unreachable cards.
+- **tests/test_templates.py** renders all 11 templates and runs `node --check`
+  over every script block. Its entity check is deliberately narrow -- quote
+  entities only -- because flagging intentional glyphs made it cry wolf.
+
+8/8 suites pass. Not closed, because they are not software: fit the relay,
+settle the SD card / power question, redeploy to the board.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

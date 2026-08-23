@@ -210,7 +210,57 @@ log the reason.
 
 ---
 
-## 6. Verification discipline
+## 6. Money safety — invariants that must never regress
+
+This machine takes cash. Anything that can silently destroy or misroute a coin
+outranks every other bug.
+
+- **A coin must never be destroyed.** A pulse train completing with no insert
+  window open used to set `credited = False` and discard the value: no session,
+  no sale, no record but a diagnostics field. Coins now go to a pending pot
+  (`CoinSlot.pending_pesos`), are claimed by the next window within
+  `uncredited_hold_s`, and are shown on the portal. **The relay is a mitigation,
+  not the mechanism** — it is optional, it can fail, and software must not
+  assume it is fitted.
+- **A coin inserted during another customer's window goes to that customer.**
+  Inherent: the acceptor reports pulses, not who dropped them. Only the relay
+  closes this. Do not pretend a code change fixes it.
+- **`apply_credit()` is not the coin path.** It is the software entry point;
+  the real path is `_pulse_cb -> _watcher -> window`. A test that calls
+  `apply_credit` directly proves nothing about coins — that gap is exactly how
+  the destroyed-coin bug survived an earlier "money safety" test.
+- Credit is **asynchronous**: the train only completes after
+  `pulse_end_gap_s`. Tests must wait for it.
+
+## 7. Testing this project
+
+`pytest tests` **runs nothing**. The files are standalone scripts that call
+`sys.exit()` at module level, so pytest aborts collection with an
+INTERNALERROR and reports success having tested nothing. Use:
+
+```bash
+python tests/run_all.py
+```
+
+Two suites are worth knowing about:
+
+- `test_reachability.py` walks the real `nftables.conf` and evaluates packets
+  against it, asserting who can reach what in each customer state
+  (unpaid / paid / whitelisted / blocked). Rule-ordering bugs are invisible in
+  a diff and this is the only thing that catches them. It models **listeners**
+  too: being permitted through to a port nothing is bound to is still a
+  failure, and that distinction is what revealed the portal bug also broke
+  whitelisted devices.
+- `test_functional.py` drives every customer and admin feature through the
+  Flask test client, including 10 and 50 concurrent customers.
+
+Concurrency is fine as it stands: 50 simultaneous customers complete in ~1.6 s
+with no thread errors and no lost sales. The per-thread sqlite connection cache
+in `db.py` is sound; do not "fix" it.
+
+---
+
+## 8. Verification discipline
 
 The recurring theme: **every one of these failed silently.** Rules that follow
 from that:

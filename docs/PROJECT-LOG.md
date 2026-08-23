@@ -102,6 +102,55 @@ listens on :80, so the input chain answered with a TCP reset. A customer could
 not check time, pause, or insert another coin until their session expired.
 Fixed by redirecting gateway-addressed port 80 above the short-circuits.
 
+---
+
+## 2026-08-23 (later) — full functional audit
+
+Every customer and admin feature exercised in mock mode, plus a firewall
+reachability model and concurrency at 10 and 50 simultaneous customers.
+Suite: `python tests/run_all.py` (7 suites, all passing).
+
+**Found: `pytest tests` runs nothing.** The files are standalone scripts with a
+module-level `sys.exit()`; pytest aborts collection with an INTERNALERROR and
+exits reporting success. The suite had effectively never been run as a suite.
+`tests/run_all.py` now runs each in its own interpreter.
+
+**Found and fixed — coins were being destroyed.** A pulse train completing with
+no insert window open discarded the money: no session, no sale, nothing but
+`last_train.credited = False` on the diagnostics page. Proven directly:
+
+```
+sales before: 0 sales / P0
+sales after : 0 sales / P0
+last_train  : {'pulses': 5, 'pesos': 5, 'credited': False}
+--> MONEY LOST
+```
+
+The relay is supposed to keep the acceptor dead between windows, but it is
+optional and can fail. Coins now go to a pending pot, are claimed by the next
+window within `uncredited_hold_s` (300 s), shown on the portal as money
+waiting, and logged; anything older stays on the books rather than being handed
+to an unrelated customer.
+
+**Found and fixed — schedules could be set to a time that never fires.**
+`admin_schedules_add` did no validation, and the scheduler matches
+`job["time"]` against `strftime("%H:%M")`, so a malformed value is stored,
+listed in the table, and never runs. No crash, no warning — the nightly backup
+just never happens. Times and job types are now validated, with the error shown.
+
+**Documented, not fixed — a coin inserted during another customer's window is
+credited to that customer.** The acceptor reports pulses, not who dropped them.
+Reproduced: customer A opened a window, customer B's ₱10 went to A. Only the
+relay closes this.
+
+**Verified sound:** expiry and re-purchase (the reported bug class), top-up
+stacking, pause/resume including buying while paused, voucher redemption /
+reuse / expiry / revocation, trial once-per-period, wallet arithmetic,
+backup-restore round-trip with secrets excluded, CSRF enforcement, login
+lockout, admin gating of CSV exports, rate limiting, and the whole admin
+surface. Concurrency: 50 customers in ~1.6 s, no thread errors, no duplicate
+sessions, 200 concurrent status polls clean.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

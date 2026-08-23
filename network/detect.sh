@@ -169,7 +169,7 @@ EOF
 # render the network configs for THIS board
 # ---------------------------------------------------------------------------
 python3 - "$CFG" "$TPL" "$LAN_IF" "$LAN_DEV" "$WAN_IF" "$CFG_GW" "$CLIENT_NET" "$USE_HOSTAPD" <<'PY'
-import json, os, sqlite3, sys
+import json, os, re, sqlite3, sys
 
 cfgp, tpl, lan_if, lan_dev, wan, gw, net, hostapd = sys.argv[1:9]
 cfg = json.load(open(cfgp))
@@ -207,6 +207,10 @@ if os.path.exists(src):
     s = open(src).read()
     # WAN before LAN so "eth0" inside a VLAN LAN like "eth0.5" isn't rewritten
     s = s.replace("eth0", wan).replace("wlan0", lan_dev).replace("10.0.0.0/24", net)
+    # Anchored to the define line rather than a blanket substitution: a bare
+    # replace of "10.0.0.1" would also rewrite the "10.0.0.1" inside a longer
+    # address such as 10.0.0.10 if one ever appears in this template.
+    s = re.sub(r"^(define GW_IP\s*=\s*).*$", r"\g<1>" + gw, s, count=1, flags=re.M)
     anti = ""
     if cfg.get("anti_tether"):
         anti = ("    chain mangle_post {\n"

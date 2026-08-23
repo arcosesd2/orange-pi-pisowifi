@@ -16,7 +16,8 @@ param(
     [string]$Target,
     [string]$User = "root",
     [switch]$Seal,
-    [switch]$ZeroFill
+    [switch]$ZeroFill,
+    [switch]$SkipTests
 )
 # NOT "Stop". Windows PowerShell turns anything a native command writes to
 # stderr into an ErrorRecord, so with Stop the script dies on ssh's own warning
@@ -123,7 +124,29 @@ $model = (ssh $dest "cat /proc/device-tree/model 2>/dev/null | tr -d '\0'") -joi
 Ok "connected -- $(if ($model) { $model } else { 'board model unknown' })"
 
 # ---------------------------------------------------------------------------
-# 2. Install
+# 2. Test before shipping
+# ---------------------------------------------------------------------------
+# Cheap insurance: the suite runs in about 25 seconds on this PC and has
+# already caught a coin-destroying bug. Shipping code that fails its own tests
+# to a machine that takes cash is not a trade worth making. -SkipTests exists
+# for the case where you are deliberately deploying a known-broken build to
+# debug it on hardware.
+if (-not $SkipTests) {
+    Say "Running the test suite before deploying"
+    $py = (Get-Command python -ErrorAction SilentlyContinue)
+    if (-not $py) {
+        Warn "python not found on PATH -- skipping the pre-deploy test run"
+    } else {
+        & python (Join-Path $src "tests\run_all.py")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Tests failed -- refusing to deploy. Fix them, or re-run with -SkipTests."
+        }
+        Ok "test suite passed"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 3. Install
 # ---------------------------------------------------------------------------
 Say "Copying the project"
 ssh $dest 'rm -rf /root/pisowifi.new && mkdir -p /root/pisowifi.new'

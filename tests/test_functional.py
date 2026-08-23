@@ -259,6 +259,16 @@ ok("relay is configured to gate the acceptor",
    "relay_gpio_pin=%r -- with no relay the acceptor takes coins at any time"
    % main.setting("relay_gpio_pin"))
 
+# The owner has to be able to SEE money going astray, or the holding pot just
+# hides the problem instead of the coins.
+ok("unclaimed coins are tallied for the owner",
+   main.slot.unclaimed_total >= 10 and main.slot.unclaimed_events >= 2,
+   "total=P%d over %d events" % (main.slot.unclaimed_total, main.slot.unclaimed_events))
+d = main.slot.diag()
+ok("the tally is exposed to the diagnostics API",
+   d.get("unclaimed_total", 0) > 0 and "pending_pesos" in d,
+   str({k: d.get(k) for k in ("unclaimed_total", "pending_pesos", "relay_pin")}))
+
 before = status()["remaining"]
 main.apply_credit(MAC, 0)
 ok("a zero-peso credit changes nothing", status()["remaining"] == before)
@@ -506,6 +516,30 @@ r = a.post("/admin/hardware", data={
     "pulse_value_pesos": "1", "denominations": json.dumps({"1": 1})})
 ok("a non-interrupt coin pin is refused", main.setting("coin_gpio_pin") == 7,
    "pin became %s" % main.setting("coin_gpio_pin"))
+
+# The hold policy has to be editable from the UI, not only from a config file
+# on a box the owner cannot SSH into.
+r = a.post("/admin/hardware", data={
+    "csrf": tok, "coin_gpio_pin": "7", "coin_edge": "rising", "coin_bounce_ms": "45",
+    "relay_gpio_pin": "13", "relay_active_low": "on", "pulse_end_gap_s": "0.8",
+    "insert_window_s": "90", "pulse_value_pesos": "1", "uncredited_hold_s": "120",
+    "denominations": json.dumps({"1": 1, "5": 5})})
+ok("unclaimed-coin hold is editable from the hardware form",
+   main.setting("uncredited_hold_s") == 120, str(main.setting("uncredited_hold_s")))
+ok("the live slot picked up the new hold", main.slot.cfg["uncredited_hold_s"] == 120,
+   str(main.slot.cfg.get("uncredited_hold_s")))
+
+# The dashboard has to warn when there is no relay, since that is the only
+# thing standing between a customer and a lost coin.
+db.set_setting("relay_gpio_pin", 0)
+page = a.get("/admin").get_data(as_text=True)
+ok("dashboard warns when no relay is configured", "No relay is configured" in page)
+db.set_setting("relay_gpio_pin", 11)
+page = a.get("/admin").get_data(as_text=True)
+ok("that warning disappears once a relay is set",
+   "No relay is configured" not in page)
+ok("dashboard reports coins that arrived with no slot open",
+   "arrived with no slot open" in page, "banner missing")
 
 
 # ===========================================================================

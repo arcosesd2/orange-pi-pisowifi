@@ -919,6 +919,14 @@ def admin():
         device_id_default=socket.gethostname(), sys=sysinfo(),
         daily=db.daily_sales(14), vouchers=db.voucher_stats(),
         watch=watch.last,
+        # Coins that landed with no window open. The owner needs to see this:
+        # a rising total means the relay is not gating the acceptor, which is
+        # the only thing preventing a coin being credited to the wrong person.
+        coin=dict(pending=slot.pending_pesos,
+                  unclaimed_total=slot.unclaimed_total,
+                  unclaimed_events=slot.unclaimed_events,
+                  relay_pin=setting("relay_gpio_pin") or 0,
+                  hold_s=int(setting("uncredited_hold_s") or 0)),
     )
 
 
@@ -1346,6 +1354,10 @@ def admin_hardware():
         db.set_setting("pulse_end_gap_s", max(0.1, float(f["pulse_end_gap_s"])))
         db.set_setting("insert_window_s", max(10, int(f["insert_window_s"])))
         db.set_setting("pulse_value_pesos", max(1, int(f["pulse_value_pesos"])))
+        # 0 is meaningful here (go back to discarding un-windowed coins), so
+        # clamp at zero rather than at one.
+        db.set_setting("uncredited_hold_s",
+                       max(0, int(f.get("uncredited_hold_s", 300) or 0)))
         denoms = json.loads(f["denominations"])
         db.set_setting("denominations",
                        {str(int(k)): int(v) for k, v in denoms.items()})

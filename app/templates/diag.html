@@ -214,6 +214,17 @@
           <label for="pv">Fallback — pesos per pulse</label>
           <input id="pv" name="pulse_value_pesos" type="number" min="1" value="{{ hw.pulse_value_pesos }}">
           <p class="hint">Used when a pulse count is not in the table above.</p>
+
+          <label for="uh">Hold unclaimed coins for (seconds)</label>
+          <input id="uh" name="uncredited_hold_s" type="number" min="0"
+                 value="{{ hw.uncredited_hold_s }}">
+          <p class="hint">
+            A coin that arrives with no slot open is held this long for the next
+            customer to claim, instead of being thrown away. After that it stays
+            on the books for you to settle. <b>0 disables holding</b> — coins
+            inserted at the wrong moment are then lost, so only set that if a
+            relay reliably keeps the acceptor dead between customers.
+          </p>
         </div>
       </div>
 

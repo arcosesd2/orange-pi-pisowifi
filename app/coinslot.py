@@ -67,6 +67,12 @@ class CoinSlot:
         self.pending_pesos = 0
         self.pending_at = 0.0
         self.claimed_pesos = 0    # last amount handed to a window from the pot
+        # Running tally since boot, for the admin dashboard. A number that
+        # keeps climbing is the signal that the relay is not gating the
+        # acceptor -- which is the only defence against a coin being credited
+        # to the wrong customer.
+        self.unclaimed_total = 0
+        self.unclaimed_events = 0
 
         self.gpio_error = None
         if not self.mock:
@@ -210,6 +216,8 @@ class CoinSlot:
                         # window claims it (see open_window).
                         self.pending_pesos += pesos
                         self.pending_at = time.monotonic()
+                        self.unclaimed_total += pesos
+                        self.unclaimed_events += 1
                         uncredited = (pesos, self.pending_pesos)
                 if self._window_mac and time.monotonic() > self._window_deadline:
                     timed_out = (self._window_mac, self._window_pesos)
@@ -300,8 +308,17 @@ class CoinSlot:
                 "last_train": last,
                 "pulses": pulses,
                 "relay": self.relay_state,
+                "relay_pin": self.cfg.get("relay_gpio_pin") or 0,
                 "window_mac": self._window_mac,
                 "window_pesos": self._window_pesos,
+                # Money that landed with nobody's window open. `pending` is
+                # still claimable; `unclaimed_total` is the running tally since
+                # boot and is the number the owner should watch -- a rising
+                # figure means the relay is not doing its job.
+                "pending_pesos": self.pending_pesos,
+                "pending_age_s": round(now - self.pending_at, 1) if self.pending_pesos else None,
+                "unclaimed_total": self.unclaimed_total,
+                "unclaimed_events": self.unclaimed_events,
             }
 
     def inject(self, pulses):

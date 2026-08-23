@@ -2,9 +2,11 @@
 # Seal this machine for imaging — turn a working PisoWiFi box into a "golden"
 # card you can clone onto any number of new machines.
 #
-#   bash seal.sh --yes            # wipe identity + takings, then power off
-#   bash seal.sh --yes --keep-db  # keep sales history (single-machine backup)
-#   bash seal.sh --yes --zero     # also zero free space (smaller .img.xz, slow)
+#   bash seal.sh --yes             # wipe identity + takings, then power off
+#   bash seal.sh --yes --keep-db   # keep sales history (single-machine backup)
+#   bash seal.sh --yes --zero      # also zero free space (smaller .img.xz, slow)
+#   bash seal.sh --yes --lock-ssh  # key-only SSH: /etc/shadow is cloned onto
+#                                  # every card, so a password is a fleet secret
 #
 # THIS IS DESTRUCTIVE on the machine it runs on. It removes everything that
 # makes this box *this* box: the sales database, the admin password, the SSH
@@ -18,12 +20,13 @@
 # card, and read it to an .img with the deployer's SD Card tab (or USBImager).
 set -u
 
-YES=0; KEEP_DB=0; ZERO=0
+YES=0; KEEP_DB=0; ZERO=0; LOCK_SSH=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --yes|-y)   YES=1 ;;
-        --keep-db)  KEEP_DB=1 ;;
-        --zero)     ZERO=1 ;;
+        --yes|-y)    YES=1 ;;
+        --keep-db)   KEEP_DB=1 ;;
+        --zero)      ZERO=1 ;;
+        --lock-ssh)  LOCK_SSH=1 ;;
         *) echo "unknown option: $1"; exit 1 ;;
     esac
     shift
@@ -170,6 +173,34 @@ rm -f /root/.bash_history /home/*/.bash_history 2>/dev/null || true
 # written from this image would otherwise carry those passwords readable to
 # anyone who puts the card in a PC.
 rm -f /root/.not_logged_in_yet
+
+# ---------------------------------------------------------------------------
+# optional: key-only SSH
+# ---------------------------------------------------------------------------
+# /etc/shadow is cloned along with everything else, so the root password
+# becomes a secret shared by every machine made from this image: learn it once
+# and you have them all. Turning off password auth means a stolen or leaked
+# password is worth nothing without the private key.
+if [ "$LOCK_SSH" = 1 ]; then
+    if ls /root/.ssh/authorized_keys >/dev/null 2>&1 && \
+       [ -s /root/.ssh/authorized_keys ]; then
+        echo "==> Locking SSH to key-only authentication"
+        mkdir -p /etc/ssh/sshd_config.d
+        cat > /etc/ssh/sshd_config.d/99-pisowifi.conf <<'EOF'
+# Every card cloned from this image shares /etc/shadow, so a password is a
+# fleet-wide secret. Keys only.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+        echo "    password login disabled; your key in /root/.ssh/authorized_keys is now the only way in"
+    else
+        # Refusing is the safe failure: enabling this with no key installed
+        # would produce cards nobody can ever log into.
+        echo "  !! --lock-ssh IGNORED: /root/.ssh/authorized_keys is missing or empty."
+        echo "  !! Locking SSH now would make every card from this image unreachable."
+    fi
+fi
 
 if [ "$ZERO" = 1 ]; then
     echo "==> Zeroing free space (makes the .img compress far smaller; slow)"

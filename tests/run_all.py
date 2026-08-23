@@ -26,6 +26,7 @@ TESTS = [
     "test_api_limits.py",
     "test_wallet_flow.py",
     "test_smoke.py",
+    "test_templates.py",
     "test_reachability.py",
     "test_functional.py",
 ]

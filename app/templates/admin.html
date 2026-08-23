@@ -2,6 +2,26 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+  {% if not coin.relay_pin %}
+  <div class="notice bad">
+    <b>No relay is configured.</b> The coin acceptor is live even when nobody
+    has the slot open, so a coin dropped at the wrong moment is credited to
+    whoever is holding the window — or to nobody. Set the relay pin in
+    <a href="/admin/diag">Diagnostics</a> and wire it, before this machine
+    faces the public.
+  </div>
+  {% endif %}
+  {% if coin.unclaimed_total %}
+  <div class="notice warn">
+    <b>₱{{ coin.unclaimed_total }} arrived with no slot open</b>
+    ({{ coin.unclaimed_events }} time{{ '' if coin.unclaimed_events == 1 else 's' }} since boot{% if coin.pending %},
+    ₱{{ coin.pending }} still waiting to be claimed{% endif %}).
+    Customers are dropping coins before tapping INSERT COIN. It is held for
+    {{ coin.hold_s }}s for the next customer — but if this keeps climbing, the
+    relay is not doing its job.
+  </div>
+  {% endif %}
+
   <div class="stats">
     <div class="stat">
       <div class="k">Today</div>

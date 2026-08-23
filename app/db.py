@@ -74,7 +74,14 @@ CREATE INDEX IF NOT EXISTS idx_vouchers_batch ON vouchers(batch);
 """
 
 # Settings kept out of a downloadable backup — see export_config().
-_SECRET_SETTINGS = ("SECRET_KEY", "remote_key")
+# Never leaves the box in a downloadable backup. The admin credential belongs
+# here too: a downloaded backup is a file people mail to themselves and drop in
+# cloud storage, and while the hash is salted PBKDF2 it is still offline-
+# crackable against a weak password -- and `admin_password` may hold the
+# one-time plaintext seed outright. A backup restored without them lands on the
+# forced first-run setup wizard, which is the right outcome anyway.
+_SECRET_SETTINGS = ("SECRET_KEY", "remote_key",
+                    "admin_pw_hash", "admin_pw_default", "admin_password")
 
 # The password shipped in config.json. A machine still on it is treated as
 # unconfigured: the admin UI refuses to do anything until it is changed.

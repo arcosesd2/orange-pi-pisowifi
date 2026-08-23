@@ -29,6 +29,7 @@ TESTS = [
     "test_templates.py",
     "test_reachability.py",
     "test_functional.py",
+    "test_security_audit.py",
 ]
 
 

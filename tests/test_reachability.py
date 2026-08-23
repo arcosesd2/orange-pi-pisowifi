@@ -59,6 +59,18 @@ def chain(text, name):
 
 # ---------------------------------------------------------------- evaluator
 
+def _is_private(addr):
+    """Mirror the PRIVATE_NETS define in nftables.conf."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    return any(ip in ipaddress.ip_network(n) for n in (
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+        "169.254.0.0/16", "127.0.0.0/8", "100.64.0.0/10"))
+
+
 class Packet(dict):
     """iif, oif, saddr, daddr, proto, dport, mac_in (sets the MAC belongs to),
     ctstate."""
@@ -85,6 +97,10 @@ def matches(rule, p):
         return False
     if "ip daddr $GW_IP" in rule and p["daddr"] != GW:
         return False
+    if "ip daddr $PRIVATE_NETS" in rule and not _is_private(p["daddr"]):
+        return False
+    if "ip6 daddr $PRIVATE_NETS6" in rule:
+        return False        # this model only carries IPv4 packets
     if "ip saddr != $CLIENT_NET" in rule and p["saddr"].startswith("10.0.0."):
         return False
 

@@ -208,6 +208,10 @@ EOF
 echo "==> IP forwarding + network tuning (sysctl)"
 cat > /etc/sysctl.d/99-pisowifi.conf <<'EOF'
 net.ipv4.ip_forward=1
+# IPv6 is deliberately NOT routed. The customer-isolation rules are
+# written for IPv4, so enabling this without extending them would give
+# customers an unfiltered path to the owner's network.
+net.ipv6.conf.all.forwarding=0
 # handle many simultaneous clients/connections without exhausting conntrack
 net.netfilter.nf_conntrack_max=131072
 net.core.netdev_max_backlog=2000

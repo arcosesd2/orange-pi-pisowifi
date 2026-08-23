@@ -20,6 +20,7 @@
   "pulse_value_pesos": 1,
   "pulse_end_gap_s": 0.7,
   "insert_window_s": 60,
+  "uncredited_hold_s": 300,
 
   "minutes_per_peso": 20,
   "bonus_tiers": { "5": 120, "10": 260, "15": 400, "20": 560 },

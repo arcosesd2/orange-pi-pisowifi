@@ -67,6 +67,15 @@
   <!-- vending -->
   <div class="card" id="vendCard">
     <div id="idleView">
+      <!-- Shown when a coin went in before anyone tapped the button. The money
+           is held rather than lost, but the customer has no way to know that
+           unless we say so. -->
+      <div id="pendingNote" class="hide"
+           style="background:#78350f33;border:1px solid #78350f;border-radius:9px;
+                  padding:10px 12px;color:#fde68a;font-size:.85rem;margin-bottom:10px">
+        💰 <b>₱<span id="pendingPesos">0</span> waiting.</b>
+        Tap INSERT COIN below to claim it.
+      </div>
       <button class="big insert" id="insertBtn">🪙 INSERT COIN</button>
       <div class="muted">Tap first, then drop your coins</div>
     </div>
@@ -159,6 +168,11 @@ function render(j) {
     if ($('walletBal')) $('walletBal').textContent = Math.floor((j.wallet || 0) / 60);
   }
   const open = j.window.open;
+  const pending = (j.window && j.window.pending) || 0;
+  if ($('pendingNote')) {
+    $('pendingNote').classList.toggle('hide', !(pending > 0) || open);
+    if (pending > 0) $('pendingPesos').textContent = pending;
+  }
   $('idleView').classList.toggle('hide', open);
   $('insertView').classList.toggle('hide', !open);
   if (open) {

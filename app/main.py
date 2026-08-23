@@ -13,6 +13,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -72,6 +73,11 @@ DEFAULTS = {
     "relay_active_low": True,
     "pulse_end_gap_s": 0.7,
     "insert_window_s": 60,
+    # Coins that land with no insert window open are held this long for
+    # the next customer to claim, instead of being destroyed. 0 = go back
+    # to discarding them (not recommended: the relay is the only other
+    # thing stopping a customer losing their money).
+    "uncredited_hold_s": 300,
     "denominations": {"1": 1, "5": 5, "10": 10, "20": 20},  # pulses -> pesos
     "pulse_value_pesos": 1,        # fallback for unmapped pulse counts
 
@@ -149,7 +155,7 @@ DEFAULTS = {
 
 HW_KEYS = ("coin_gpio_pin", "coin_edge", "coin_bounce_ms", "relay_gpio_pin",
            "relay_active_low", "pulse_end_gap_s", "insert_window_s",
-           "denominations", "pulse_value_pesos")
+           "denominations", "pulse_value_pesos", "uncredited_hold_s")
 
 CFG_PATH = os.environ.get(
     "PISOWIFI_CONFIG", os.path.join(os.path.dirname(__file__), "config.json")
@@ -1179,9 +1185,19 @@ def admin_branding():
 def admin_schedules():
     if not admin_ok():
         return redirect("/admin/login")
+    return _schedules_page()
+
+
+# Job types the scheduler actually implements. Anything else is accepted into
+# the list and then logged as "unknown job type" once a day, where nobody sees
+# it — so reject it at the door instead.
+SCHEDULE_TYPES = ("reboot", "backup", "set_rate", "blocklist_refresh", "report")
+
+
+def _schedules_page(error=None):
     return render_template(
         "schedules.html", name=setting("hotspot_name"),
-        schedules=setting("schedules") or [],
+        schedules=setting("schedules") or [], error=error,
         dns_filter=setting("dns_filter"), blocklist=blocklist_status)
 
 
@@ -1191,10 +1207,24 @@ def admin_schedules_add():
         return redirect("/admin/login")
     f = request.form
     jobs = list(setting("schedules") or [])
-    job = {"type": f.get("type"), "time": f.get("time") or "03:00",
-           "days": [int(d) for d in f.getlist("days")]}
+    # Validate before storing. The scheduler fires a job by comparing its
+    # `time` to strftime("%H:%M"), so anything that is not exactly HH:MM simply
+    # never matches -- the job is accepted, listed in the table, and silently
+    # never runs. That is worst for the jobs you notice least: nightly backups
+    # and the auto-reboot.
+    hhmm = (f.get("time") or "03:00").strip()
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", hhmm):
+        return _schedules_page(error=f"Time must be HH:MM in 24-hour form — {hhmm!r} is not.")
+    jtype = f.get("type")
+    if jtype not in SCHEDULE_TYPES:
+        return _schedules_page(error=f"Unknown job type {jtype!r}.")
+    job = {"type": jtype, "time": hhmm,
+           "days": sorted({int(d) for d in f.getlist("days") if d.isdigit() and 0 <= int(d) <= 6})}
     if job["type"] == "set_rate":
-        job["value"] = int(f.get("value") or 20)
+        try:
+            job["value"] = max(1, int(f.get("value") or 20))
+        except ValueError:
+            return _schedules_page(error="Rate change needs a whole number of minutes.")
     jobs.append(job)
     db.set_setting("schedules", jobs)
     _audit("schedule add", job.get("type"))

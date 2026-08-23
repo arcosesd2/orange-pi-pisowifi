@@ -25,6 +25,7 @@
 {% endblock %}
 
 {% block content %}
+  {% if error %}<div class="notice bad">{{ error }}</div>{% endif %}
   <section class="card">
     <div class="card-head">
       <h2>Scheduled jobs</h2>

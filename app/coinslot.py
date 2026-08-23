@@ -61,6 +61,12 @@ class CoinSlot:
         self.pulse_log = collections.deque(maxlen=100)  # monotonic timestamps
         self.last_train = None    # {"pulses": n, "pesos": x, "ago": ts, "credited": bool}
         self.relay_state = False
+        # Coins that arrived with no insert window open. Held rather than
+        # destroyed; the next customer to open a window claims them, provided
+        # they do so within `uncredited_hold_s`.
+        self.pending_pesos = 0
+        self.pending_at = 0.0
+        self.claimed_pesos = 0    # last amount handed to a window from the pot
 
         self.gpio_error = None
         if not self.mock:
@@ -173,7 +179,7 @@ class CoinSlot:
     def _watcher(self):
         while True:
             time.sleep(0.05)
-            fire = timed_out = None
+            fire = timed_out = uncredited = None
             with self._lock:
                 if (
                     self._train
@@ -193,11 +199,27 @@ class CoinSlot:
                             time.monotonic() + float(self.cfg["insert_window_s"])
                         )
                         fire = (self._window_mac, pesos)
+                    else:
+                        # A real coin just fell in with nobody's window open.
+                        # This used to be thrown away silently: no session, no
+                        # sale, no record beyond a diagnostics field, and the
+                        # customer simply lost their money. The relay is meant
+                        # to lock the acceptor at these moments, but it is
+                        # optional and can fail, so never rely on it alone.
+                        # Hold the value instead; the next customer to open a
+                        # window claims it (see open_window).
+                        self.pending_pesos += pesos
+                        self.pending_at = time.monotonic()
+                        uncredited = (pesos, self.pending_pesos)
                 if self._window_mac and time.monotonic() > self._window_deadline:
                     timed_out = (self._window_mac, self._window_pesos)
                     self._close_locked()
             if fire:
                 self.on_coin(*fire)
+            if uncredited:
+                print("coinslot: P%d inserted with no window open -- holding "
+                      "P%d for the next customer" % uncredited,
+                      file=sys.stderr, flush=True)
             if timed_out:
                 self.on_timeout(*timed_out)
 
@@ -212,6 +234,16 @@ class CoinSlot:
             self._window_deadline = time.monotonic() + float(self.cfg["insert_window_s"])
             if self._window_pesos == 0:
                 self._train = 0
+            # Hand over any coins that fell in while nobody had the slot open.
+            # Bounded by uncredited_hold_s so a coin from hours ago is not
+            # given away to an unrelated customer; anything older stays on the
+            # books for the owner to see and settle by hand.
+            hold = float(self.cfg.get("uncredited_hold_s", 300) or 0)
+            fresh = time.monotonic() - self.pending_at <= hold
+            if self.pending_pesos and hold > 0 and fresh:
+                self._window_pesos += self.pending_pesos
+                self.claimed_pesos = self.pending_pesos
+                self.pending_pesos = 0
         self._relay(True)
         return True
 
@@ -238,6 +270,10 @@ class CoinSlot:
                 "pesos": self._window_pesos if self._window_mac == mac else 0,
                 "seconds_left": max(0, int(self._window_deadline - time.monotonic()))
                 if self._window_mac == mac else 0,
+                # Coins waiting to be claimed by whoever opens the next window.
+                # Surfaced so the portal can say "P5 waiting -- tap INSERT COIN"
+                # rather than leaving the customer to wonder where it went.
+                "pending": self.pending_pesos,
             }
 
     def diag(self):

@@ -108,6 +108,28 @@ is a config toggle that **defaults to off / current behavior**.
 > your LAN interface is the USB ethernet (e.g. `enx...` / `eth1`) instead of
 > `wlan0` — just change `lan_if` in the config and skip hostapd.
 
+## 1b. Turn on client isolation at the access point
+
+**This is the one security control the Pi cannot enforce for you.** Two
+customers on `10.0.0.0/24` are on a single switched segment, so their traffic
+never reaches the Pi at all — nftables cannot filter what it does not see. A
+customer can otherwise scan, ARP-spoof and attack the phone next to them.
+
+- **Own-radio topology** (USB WiFi + hostapd): already handled —
+  [`network/hostapd.conf`](network/hostapd.conf) sets `ap_isolate=1`.
+- **Wired topology** (external AP/antenna, the recommended build): you must
+  enable it on the AP itself. On the CF-EW73 and most cheap APs the setting is
+  called **AP Isolation**, **Client Isolation** or **Station Isolation**, under
+  the wireless or multi-SSID page. Turn it on and verify: connect two phones
+  and try to ping one from the other. It should fail.
+
+Customers are separately blocked from routing into your own network — the
+firewall rejects RFC1918, link-local and CGNAT destinations for paying clients,
+so the ISP router's admin page, your NAS and your CCTV are unreachable from the
+hotspot. Whitelisted devices and anything in the walled garden are exempt, so
+add a local host to `walled_hosts` if you deliberately want customers to reach
+it.
+
 ## 2. Wiring the coin acceptor
 
 Common ground between the 12 V PSU and the Orange Pi GND.

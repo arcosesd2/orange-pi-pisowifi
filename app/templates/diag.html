@@ -192,6 +192,13 @@
         <div>
           <label for="hw-relaypin">Relay pin</label>
           <select name="relay_gpio_pin" id="hw-relaypin"></select>
+          <p class="hint">
+            <b>Reusing a WiFi5-Soft harness?</b> That firmware numbers pins by
+            sysfs line, not by header position: its <code>relaypin: 11</code>
+            means <b>PA11 = physical pin 5</b>, not physical pin 11 (which is
+            PA1). Its coin line lands on physical pin 3 either way, so the coin
+            wire works unchanged while the relay silently does not.
+          </p>
           <label class="check" style="margin-top:10px">
             <input type="checkbox" name="relay_active_low" {{ 'checked' if hw.relay_active_low }}>
             <span>Relay is active-LOW <span class="muted">(most cheap relay boards are)</span></span>

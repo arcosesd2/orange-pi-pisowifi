@@ -148,6 +148,19 @@ Each coin pulse pulls GPIO low → falling edge counted by `app/coinslot.py`.
 (PA1), relay switches the acceptor's 12 V line. Set `"relay_gpio_pin": 11` in
 config (or `null` to disable).
 
+> **Reusing a WiFi5-Soft harness?** That firmware numbers GPIOs by **sysfs
+> line**, this project numbers them by **physical header position**. They
+> coincide for the coin wire and diverge for the relay:
+>
+> | Signal | WiFi5-Soft `vendo.json` | = SUNXI | = physical pin | Set here as |
+> |---|---|---|---|---|
+> | Coin | `coinpin: 12` | PA12 | **3** | `coin_gpio_pin: 3` ✅ same wire |
+> | Relay | `relaypin: 11` | PA11 | **5** | `relay_gpio_pin: 5` ⚠️ **not 11** |
+> | Bill | `bill: 6` | PA6 | **7** | *(bill acceptor not implemented)* |
+>
+> Physical pin 11 is PA1 — a different pin entirely. The coin line works
+> unchanged, so the mismatch shows up only as a relay that never clicks.
+
 **Train the acceptor** (CH-926: press SET, follow manual): sample each coin ~20×
 and program pulses = peso value → ₱1 = 1 pulse, ₱5 = 5, ₱10 = 10, ₱20 = 20.
 Set the switch on the side to **NO (normally open)** and fast pulse speed.

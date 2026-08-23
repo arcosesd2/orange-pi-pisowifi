@@ -97,7 +97,11 @@ def heartbeat():
 # ---------- viewing ----------
 
 def viewer_ok():
-    return not DASH_PASSWORD or session.get("viewer") is True
+    # DASH_PASSWORD is REQUIRED. It used to be optional, and `not DASH_PASSWORD`
+    # then made every visitor a viewer -- so an unconfigured dashboard published
+    # your takings, machine list and uptime to anyone who found the URL. This is
+    # the only internet-facing part of the system, so it fails closed instead.
+    return bool(DASH_PASSWORD) and session.get("viewer") is True
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -146,4 +150,16 @@ def api_devices():
 
 
 if __name__ == "__main__":
+    # Refuse to start misconfigured rather than serving a silently open
+    # dashboard. Both secrets are load-bearing: PISO_KEY authenticates the
+    # machines pushing reports in, DASH_PASSWORD gates who may read them.
+    missing = [n for n, v in (("PISO_KEY", PISO_KEY),
+                              ("DASH_PASSWORD", DASH_PASSWORD)) if not v]
+    if missing:
+        raise SystemExit(
+            "refusing to start: %s not set.\n"
+            "  export PISO_KEY='a-long-random-secret'      # shared with every machine\n"
+            "  export DASH_PASSWORD='your-viewing-password'\n"
+            "Without DASH_PASSWORD the dashboard would be readable by anyone who\n"
+            "finds the URL, and it shows your earnings." % " and ".join(missing))
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

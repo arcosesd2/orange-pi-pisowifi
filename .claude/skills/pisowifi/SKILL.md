@@ -232,7 +232,31 @@ outranks every other bug.
 - Credit is **asynchronous**: the train only completes after
   `pulse_end_gap_s`. Tests must wait for it.
 
-## 7. Testing this project
+## 7. Security invariants
+
+The threat model is a customer standing in the shop with a phone.
+
+- **Customers get the internet, not the owner's network.** The uplink plugs
+  into the owner's home router, so without an explicit block every paying
+  client is inside that LAN -- router admin page, NAS, CCTV, PCs. The forward
+  chain rejects `$PRIVATE_NETS` (RFC1918 + 169.254 + 127/8 + CGNAT). Two
+  escape hatches sit ABOVE the block and must stay there: `@whitelist` (the
+  owner's own devices) and `@walled` (deliberately allowed local hosts).
+- **IPv6 forwarding is off on purpose.** The isolation rules are IPv4-first;
+  enabling `net.ipv6.conf.all.forwarding` routes straight around them.
+- **Customer-to-customer is not this machine's to filter.** Same subnet means
+  switched, not routed -- nftables never sees it. AP Isolation on the antenna
+  is the only control. Documented in README section 1b.
+- **Downloadable backups must not carry credentials.** `_SECRET_SETTINGS`
+  strips `SECRET_KEY`, `remote_key`, `admin_pw_hash`, `admin_pw_default` and
+  `admin_password`. The on-box scheduled backup keeps them
+  (`include_secrets=True`) so a local restore stays complete.
+- Accepted and not fixable here: MAC spoofing inherits paid time, and DNS to
+  the box is a low-bandwidth tunnel that captive-portal detection requires.
+
+`tests/test_security_audit.py` asserts all of this from the customer's side.
+
+## 8. Testing this project
 
 `pytest tests` **runs nothing**. The files are standalone scripts that call
 `sys.exit()` at module level, so pytest aborts collection with an
@@ -260,7 +284,7 @@ in `db.py` is sound; do not "fix" it.
 
 ---
 
-## 8. Verification discipline
+## 9. Verification discipline
 
 The recurring theme: **every one of these failed silently.** Rules that follow
 from that:

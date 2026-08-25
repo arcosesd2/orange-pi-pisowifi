@@ -190,10 +190,24 @@
                  value="{{ speed.up }}"></div>
       </div>
       <p class="hint" id="spHint"></p>
+      {% if speed.enabled and speed.unshaped %}
+      <div class="notice warn" style="margin-top:12px">
+        <b>{{ speed.unshaped }} paid client{{ '' if speed.unshaped == 1 else 's' }}
+        {{ 'is' if speed.unshaped == 1 else 'are' }} NOT capped right now</b>
+        — running at full speed.
+        {% if speed.reasons %}<br>{{ speed.reasons | join('; ') }}.{% endif %}
+        <br>Normal for a few seconds after either the board or the client
+        restarts; it retries every reconcile pass. If it persists, check that
+        the customer LAN adapter has not been replugged.
+      </div>
+      {% endif %}
       <div class="actions">
         <button>Save speed limit</button>
-        {% if speed.shaped_now %}
-          <span class="muted">{{ speed.shaped_now }} client{{ '' if speed.shaped_now == 1 else 's' }} shaped right now</span>
+        {% if speed.enabled %}
+          <span class="muted">
+            {{ speed.shaped_now }} capped{% if speed.unshaped %},
+            <b style="color:var(--warn)">{{ speed.unshaped }} not</b>{% endif %}
+          </span>
         {% endif %}
       </div>
       <p class="hint">

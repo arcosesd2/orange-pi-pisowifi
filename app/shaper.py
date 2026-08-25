@@ -138,6 +138,22 @@ def limit(ip, up, down):
     _tc("filter", "replace", "dev", IFB, "protocol", "ip", "parent", "1:",
         "prio", str(m), "u32", "match", "ip", "src", f"{ip}/32", "flowid", cid)
 
+    # Read the kernel back. Every tc call above is unchecked, so without this a
+    # failure is invisible: the caller believes the customer is capped, the
+    # customer is not, and the only symptom is one device eating the line.
+    return is_limited(ip)
+
+
+def is_limited(ip):
+    """True when the kernel really holds a shaping class for this IP."""
+    if not HAVE_TC or not _LAN:
+        return False
+    cid = f"1:{_minor(ip):x}"
+    for dev in (_LAN, IFB):
+        if cid not in _tc("class", "show", "dev", dev).stdout:
+            return False
+    return True
+
 
 def unlimit(ip):
     """Remove any cap on `ip` (return it to full speed). Safe if none exists."""

@@ -53,7 +53,8 @@ PAGES = {
     "admin.html": dict(
         sales=SALES, active=[{"mac": "aa:bb:cc:dd:ee:01", "paused": False, "remaining": 3720}],
         rate=20, tiers={"5": 120, "10": 260, "20": 560}, mock=False, coin=COIN,
-        speed={"enabled": True, "down": 5, "up": 3, "shaped_now": 2},
+        speed={"enabled": True, "down": 5, "up": 3, "shaped_now": 2,
+               "unshaped": 1, "reasons": ["no IP yet (client not seen on the network)"]},
         remote={"remote_enabled": False, "remote_url": "", "remote_key": "",
                 "remote_interval_s": 300, "device_id": ""},
         remote_last={"at": None, "ok": False, "detail": ""}, device_id_default="pisowifi-42af48",

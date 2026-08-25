@@ -526,6 +526,13 @@ r = a.post("/admin/speed", data={"csrf": tok, "speed_enabled": "on",
 ok("a nonsense cap is clamped, not stored",
    main.setting("speed_profiles")["default"] == {"up": "1mbit", "down": "1mbit"},
    str(main.setting("speed_profiles")["default"]))
+# A cap that is not actually in force must be reported, never assumed. This is
+# the state right after either the board or the client reboots.
+ok("the dashboard reports real shaping state, not intent",
+   set(main._speed_summary()) >= {"enabled", "shaped_now", "unshaped", "reasons"},
+   str(main._speed_summary()))
+ok("shaper verifies its own work", hasattr(main.shaper, "is_limited"))
+ok("shaper can re-arm a lost root qdisc", hasattr(main.shaper, "ensure_setup"))
 
 r = a.post("/admin/branding", data={"csrf": tok, "color": "#ff0000",
                                     "show_redeem": "on", "show_trial": "on"})

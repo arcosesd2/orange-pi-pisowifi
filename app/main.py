@@ -388,18 +388,46 @@ def _ip_for_mac(mac):
     return None
 
 
+# MACs we wanted to shape but could not, and why. Read by the dashboard so a
+# cap that is not actually in force is visible instead of assumed.
+unshaped = {}
+
+
 def _apply_speed(mac, speed_name):
-    """Install (or clear) the per-client bandwidth cap for mac's current IP."""
+    """Install (or clear) the per-client bandwidth cap for mac's current IP.
+
+    Reports rather than guesses. Shaping can fail for reasons nothing else
+    notices: right after either machine reboots the neighbour table is empty,
+    so the MAC has no IP yet; and if the LAN device was recreated the tc tree
+    is gone. Both used to leave the customer silently uncapped.
+    """
     if MOCK:
         return
+    prof = _resolve_speed(speed_name or setting("default_speed"))
+    want_cap = bool(prof and prof.get("down"))
+
     ip = _ip_for_mac(mac)
     if not ip:
+        # Normal for a few seconds after a reboot on either side; the reconcile
+        # loop retries as soon as the client sends a packet.
+        if want_cap:
+            unshaped[mac] = "no IP yet (client not seen on the network)"
         return
-    prof = _resolve_speed(speed_name or setting("default_speed"))
-    if prof and prof.get("down"):
-        shaper.limit(ip, prof.get("up"), prof.get("down"))
-    else:
+
+    if not want_cap:
         shaper.unlimit(ip)
+        unshaped.pop(mac, None)
+        return
+
+    if shaper.limit(ip, prof.get("up"), prof.get("down")):
+        if unshaped.pop(mac, None):
+            app.logger.info("shaper: %s now capped at %s/%s",
+                            mac, prof.get("down"), prof.get("up"))
+        return
+
+    unshaped[mac] = f"tc would not apply {prof.get('down')}/{prof.get('up')} to {ip}"
+    app.logger.warning("shaper: FAILED to cap %s (%s) -- customer is running "
+                       "at full speed", mac, ip)
 
 
 def _unapply_speed(mac):
@@ -966,10 +994,25 @@ def _speed_summary():
             return int(float(str(v).lower().replace("mbit", "").strip()))
         except (TypeError, ValueError):
             return 0
-    return {"enabled": bool(prof and prof.get("down")),
+    enabled = bool(prof and prof.get("down"))
+    # Count what the kernel is really doing, not what we asked for.
+    shaped = missing = 0
+    if enabled and not MOCK:
+        now = time.time()
+        for s in db.active_sessions():
+            if s["paused_remaining"] is not None or s["expires_at"] <= now:
+                continue
+            ip = _ip_for_mac(s["mac"])
+            if ip and shaper.is_limited(ip):
+                shaped += 1
+            else:
+                missing += 1
+    return {"enabled": enabled,
             "down": mbit(prof.get("down")) if prof else 5,
             "up": mbit(prof.get("up")) if prof else 3,
-            "shaped_now": len(shaper.active_ips()) if not MOCK else 0}
+            "shaped_now": shaped,
+            "unshaped": missing,
+            "reasons": sorted(set(unshaped.values()))[:2]}
 
 
 @app.route("/admin/settings", methods=["POST"])

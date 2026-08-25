@@ -309,6 +309,8 @@ Verified on hardware: reboot with a live session, a held coin and a cap in
 force — session time correct to the second, ₱7 restored, shaping rebuilt, zero
 failures logged.
 
+---
+
 ## 9. Testing this project
 
 `pytest tests` **runs nothing**. The files are standalone scripts that call

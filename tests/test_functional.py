@@ -434,8 +434,34 @@ ok("bonus tiers saved", main.setting("bonus_tiers") == {"5": 150, "10": 320},
    str(main.setting("bonus_tiers")))
 ok("new rate is what a P5 coin now buys", main.minutes_for(5) == 150,
    str(main.minutes_for(5)))
-ok("an unlisted amount uses the fallback", main.minutes_for(3) == 75,
-   str(main.minutes_for(3)))
+# Between tiers, the better per-peso rate carries: P5=150 is 30/peso, so P7
+# earns 210, not the base 25/peso = 175.
+ok("an amount between tiers earns the better tier rate",
+   main.minutes_for(7) == 210, "P7 = %s (want 210)" % main.minutes_for(7))
+ok("an amount below every tier uses the base rate",
+   main.minutes_for(3) == 75, str(main.minutes_for(3)))
+
+# The invariant that matters commercially: more money must never buy less time.
+# Proven against a deliberately hostile table, not just a sane one.
+db.set_setting("minutes_per_peso", 12)
+db.set_setting("bonus_tiers", {"5": 120, "9": 100, "13": 500})   # tier 9 is a mistake
+ladder = [main.minutes_for(p) for p in range(1, 41)]
+ok("more money NEVER buys less time, even with a mis-typed tier",
+   all(b >= a for a, b in zip(ladder, ladder[1:])),
+   "regressions at P%s" % [i + 1 for i, (a, b) in enumerate(zip(ladder, ladder[1:])) if b < a])
+
+# Match the commercial machine exactly on its own published table.
+db.set_setting("minutes_per_peso", 20)
+db.set_setting("bonus_tiers", {"1": 20, "5": 120, "10": 240,
+                               "15": 360, "20": 480, "25": 1440})
+VEND = {1: 20, 5: 24, 10: 24, 15: 24, 20: 24, 25: 57.6}
+diffs = [(p, main.minutes_for(p), int(p * VEND[max(k for k in VEND if k <= p)]))
+         for p in range(1, 31)]
+ok("reproduces the WiFi5-Soft rate table exactly, P1-P30",
+   all(mine == vend for _, mine, vend in diffs),
+   str([d for d in diffs if d[1] != d[2]][:4]))
+ok("the P25 day pass is exactly 24 hours", main.minutes_for(25) == 1440,
+   str(main.minutes_for(25)))
 ok("blank password field leaves the password alone",
    db.verify_admin("auditpass1"))
 

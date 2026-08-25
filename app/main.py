@@ -300,10 +300,37 @@ def hwcfg():
 
 
 def minutes_for(pesos):
-    tiers = setting("bonus_tiers") or {}
-    if str(pesos) in tiers:
-        return int(tiers[str(pesos)])
-    return int(pesos * setting("minutes_per_peso"))
+    """Minutes bought by `pesos`, using the best per-peso rate the customer
+    has reached.
+
+    A tier is stored as the TOTAL minutes for that amount, because that is how
+    an owner prices a machine ("five pesos buys two hours"). What it really
+    encodes is a RATE: 120/5 = 24 min per peso. Amounts between tiers earn that
+    same rate rather than dropping back to the base one.
+
+    The old lookup matched tiers exactly and fell back to the base rate for
+    everything else, which made a bigger coin buy less time -- with tiers
+    {5: 120} over a base of 12, P5 bought 2 h and P6 bought 1 h 12. A customer
+    adding a peso lost 48 minutes. Taking the best rate at or below the amount
+    makes that impossible: the multiplier can only grow with the amount, so the
+    total can only grow too, whatever anyone types into the rate table.
+
+    Matches the commercial WiFi5-Soft behaviour, proven against 10,860 of its
+    session logs (see docs/PROJECT-LOG.md).
+    """
+    pesos = int(pesos)
+    if pesos <= 0:
+        return 0
+    base = float(setting("minutes_per_peso") or 0)
+    rates = [base]
+    for amount, total in (setting("bonus_tiers") or {}).items():
+        try:
+            amount, total = int(amount), float(total)
+        except (TypeError, ValueError):
+            continue          # a malformed row must not break pricing
+        if 0 < amount <= pesos:
+            rates.append(total / amount)
+    return int(pesos * max(rates))
 
 
 def rate_rows():

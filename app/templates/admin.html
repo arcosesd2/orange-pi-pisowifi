@@ -127,7 +127,9 @@
     <h2>Coin → time</h2>
     <p class="muted">
       What each amount buys. Coins inserted in one go add up, so five ₱1 coins
-      get the ₱5 time. Anything not listed falls back to the per-peso rate.
+      get the ₱5 time. An amount <b>between</b> two tiers earns the better
+      tier's per-peso rate — set ₱5 → 2h and ₱6 automatically buys 2h 24m, not
+      a drop back to the base rate. More money can never buy less time.
     </p>
 
     <form method="post" action="/admin/settings" onsubmit="return packTiers()">

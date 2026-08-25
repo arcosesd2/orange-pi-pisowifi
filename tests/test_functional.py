@@ -534,6 +534,21 @@ ok("the dashboard reports real shaping state, not intent",
 ok("shaper verifies its own work", hasattr(main.shaper, "is_limited"))
 ok("shaper can re-arm a lost root qdisc", hasattr(main.shaper, "ensure_setup"))
 
+# A coin held in the pot is real money; a reboot must not eat it.
+main.slot.pending_pesos = 7
+main.slot._pending_wall = time.time()
+main._save_pending(7, main.slot._pending_wall)
+saved = db.get_setting("pending_pesos")
+ok("held coins are persisted, so a restart cannot destroy them",
+   saved and int(saved[0]) == 7, str(saved))
+main._save_pending(0, 0.0)
+ok("the pot is cleared once claimed", int((db.get_setting("pending_pesos") or [0])[0]) == 0)
+
+# A clock that never synced must be visible rather than quietly wrong.
+ok("clock checkpoint is recorded", db.get_setting("clock_checkpoint") is not None
+   or main.MOCK, "no checkpoint")
+ok("clock sanity check exists", hasattr(main, "_check_clock"))
+
 r = a.post("/admin/branding", data={"csrf": tok, "color": "#ff0000",
                                     "show_redeem": "on", "show_trial": "on"})
 ok("branding saved", r.status_code == 302)

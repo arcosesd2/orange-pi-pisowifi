@@ -475,11 +475,22 @@ def apply_credit(mac, pesos):
            speed=_speed_for_pesos(pesos))
 
 
+def _save_pending(pesos, wall):
+    """Persist the held-coin pot so a reboot cannot eat somebody's money."""
+    db.set_setting("pending_pesos", [int(pesos), float(wall)])
+
+
 slot = CoinSlot(
     hwcfg(),
     on_coin=lambda mac, pesos: app.logger.info("coin: P%d from %s", pesos, mac),
     on_timeout=apply_credit,  # never swallow money if the user walks away
+    on_pending=_save_pending,
+    # A coin held when the board went down is still owed to a customer.
+    pending=tuple(db.get_setting("pending_pesos") or (0, 0.0)),
 )
+if slot.pending_pesos:
+    app.logger.warning("coinslot: restored P%d of held coins across restart",
+                       slot.pending_pesos)
 
 
 def _reserved_pins():
@@ -982,7 +993,7 @@ def admin():
                   unclaimed_events=slot.unclaimed_events,
                   relay_pin=setting("relay_gpio_pin") or 0,
                   hold_s=int(setting("uncredited_hold_s") or 0)),
-        speed=_speed_summary(),
+        speed=_speed_summary(), clock_warning=clock_warning,
     )
 
 
@@ -1693,6 +1704,7 @@ def _reconcile_once():
     # dongle unplug is enough). Cheap no-op when the root is already armed.
     if shaper.ensure_setup():
         app.logger.warning("shaper: root qdisc was missing, re-armed")
+    _check_clock()
     wanted = {}
     for s in db.active_sessions():
         if s["paused_remaining"] is not None:
@@ -1728,9 +1740,39 @@ def reconcile():
 
 # ---------- boot: resync kernel state with DB after a restart ----------
 
+clock_warning = None
+
+
+def _check_clock():
+    """Detect a wall clock that has not synced yet, and say so.
+
+    No RTC on this board: at boot the clock resumes from whatever was last
+    saved, then jumps when NTP lands. Sessions store an absolute expiry, so a
+    clock that is behind hands out extra time and one that is ahead expires
+    paying customers early. Either way it must not be silent -- a checkpoint is
+    written every reconcile pass, and time going backwards across a restart is
+    the tell.
+    """
+    global clock_warning
+    now = time.time()
+    mark = float(db.get_setting("clock_checkpoint") or 0)
+    if mark and now < mark - 120:
+        behind = int(mark - now)
+        clock_warning = ("System clock is %dh%02dm behind where it was before "
+                         "the last restart - NTP has not synced. Session times "
+                         "and sales timestamps are unreliable until it does."
+                         % (behind // 3600, behind % 3600 // 60))
+        app.logger.warning("clock: %s", clock_warning)
+        return False
+    clock_warning = None
+    db.set_setting("clock_checkpoint", now)
+    return True
+
+
 def resync():
     if MOCK:
         return
+    _check_clock()
     shaper.configure(setting("gaming_priority"))
     shaper.setup(lan_dev())
     firewall.load_device_sets(db.list_devices())

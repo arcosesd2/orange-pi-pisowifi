@@ -1,7 +1,12 @@
 [Unit]
 Description=PisoWiFi portal and vending server
-After=network.target nftables.service pisowifi-detect.service
-Wants=nftables.service pisowifi-detect.service
+# time-sync.target matters more than it looks: the Orange Pi One has no
+# battery-backed clock, so at boot the wall clock is whatever was last saved
+# and jumps when NTP lands. Session expiry is stored as an absolute timestamp,
+# so resync() computing "expires_at - now" against a pre-sync clock gets the
+# remaining time wrong for every paying customer.
+After=network.target nftables.service pisowifi-detect.service time-sync.target
+Wants=nftables.service pisowifi-detect.service time-sync.target
 
 [Service]
 Type=simple

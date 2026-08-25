@@ -40,7 +40,7 @@ _GPIO_KEYS = ("coin_gpio_pin", "coin_edge", "coin_bounce_ms",
 
 
 class CoinSlot:
-    def __init__(self, cfg, on_coin, on_timeout):
+    def __init__(self, cfg, on_coin, on_timeout, on_pending=None, pending=(0, 0.0)):
         """on_coin(mac, pesos): fired per completed coin.
         on_timeout(mac, total_pesos): fired if the insert window expires —
         the caller must still credit the money (never swallow coins)."""
@@ -64,8 +64,15 @@ class CoinSlot:
         # Coins that arrived with no insert window open. Held rather than
         # destroyed; the next customer to open a window claims them, provided
         # they do so within `uncredited_hold_s`.
-        self.pending_pesos = 0
-        self.pending_at = 0.0
+        # Restored across restarts: a coin held in the pot is real money, and a
+        # reboot must not eat it. `pending` is (pesos, wall-clock seconds) as
+        # last persisted; the age is carried in wall time because monotonic
+        # clocks reset at boot.
+        self.on_pending = on_pending
+        self.pending_pesos = int(pending[0] or 0)
+        self._pending_wall = float(pending[1] or 0.0)
+        self.pending_at = time.monotonic() - max(
+            0.0, time.time() - self._pending_wall) if self.pending_pesos else 0.0
         self.claimed_pesos = 0    # last amount handed to a window from the pot
         # Running tally since boot, for the admin dashboard. A number that
         # keeps climbing is the signal that the relay is not gating the
@@ -185,7 +192,7 @@ class CoinSlot:
     def _watcher(self):
         while True:
             time.sleep(0.05)
-            fire = timed_out = uncredited = None
+            fire = timed_out = uncredited = save_pot = None
             with self._lock:
                 if (
                     self._train
@@ -216,14 +223,18 @@ class CoinSlot:
                         # window claims it (see open_window).
                         self.pending_pesos += pesos
                         self.pending_at = time.monotonic()
+                        self._pending_wall = time.time()
                         self.unclaimed_total += pesos
                         self.unclaimed_events += 1
                         uncredited = (pesos, self.pending_pesos)
+                        save_pot = (self.pending_pesos, self._pending_wall)
                 if self._window_mac and time.monotonic() > self._window_deadline:
                     timed_out = (self._window_mac, self._window_pesos)
                     self._close_locked()
             if fire:
                 self.on_coin(*fire)
+            if save_pot and self.on_pending:
+                self.on_pending(*save_pot)      # survive a reboot
             if uncredited:
                 print("coinslot: P%d inserted with no window open -- holding "
                       "P%d for the next customer" % uncredited,
@@ -235,6 +246,7 @@ class CoinSlot:
 
     def open_window(self, mac):
         """Claim the slot for `mac`. Returns False if someone else holds it."""
+        claimed = False
         with self._lock:
             if self._window_mac and self._window_mac != mac:
                 return False
@@ -252,6 +264,10 @@ class CoinSlot:
                 self._window_pesos += self.pending_pesos
                 self.claimed_pesos = self.pending_pesos
                 self.pending_pesos = 0
+                self._pending_wall = 0.0
+                claimed = True
+        if claimed and self.on_pending:
+            self.on_pending(0, 0.0)             # pot emptied; forget it
         self._relay(True)
         return True
 

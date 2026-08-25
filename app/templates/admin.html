@@ -2,6 +2,11 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+  {% if clock_warning %}
+  <div class="notice bad">
+    <b>Clock not synced.</b> {{ clock_warning }}
+  </div>
+  {% endif %}
   {% if not coin.relay_pin %}
   <div class="notice bad">
     <b>No relay is configured.</b> The coin acceptor is live even when nobody

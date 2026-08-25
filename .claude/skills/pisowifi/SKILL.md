@@ -256,7 +256,60 @@ The threat model is a customer standing in the shop with a phone.
 
 `tests/test_security_audit.py` asserts all of this from the customer's side.
 
-## 8. Testing this project
+## 8. Rates, and what survives a restart
+
+### 8a. `bonus_tiers` stores totals but MEANS rates
+
+    stored   {"5": 120}      = five pesos buys two hours
+    means    24 min per peso
+
+An amount between tiers earns the **better tier's rate**, not the base rate.
+`minutes_for()` takes the max of the base rate and every tier at or below the
+amount, so the multiplier can only grow with the amount — **more money can
+never buy less time**, whatever is typed into the table.
+
+    FAILS   exact-match lookup + linear fallback
+            base 12, tier {5:120}  ->  P5 = 2h, P6 = 1h12  (customer loses 48 min)
+    WORKS   best rate at or below the amount
+            base 12, tier {5:120}  ->  P5 = 2h, P6 = 2h24
+
+This reproduces WiFi5-Soft exactly across P1–P30, including its P25 = 24 h day
+pass. Its `minute` field is a per-peso multiplier applied to the highest tier
+≤ the amount — proven in `PISOWIFI_RATE_FORMULA.md` against 10,860 of that
+machine's session logs. Every RE report, **and my own first reading**, took it
+as a total; that would mean P20 buys less than P5. `57.6 × 25 = 1440` is the
+tell.
+
+### 8b. Restart is a state transition, on both sides
+
+Anything held only in RAM, or computed from the wall clock, breaks quietly when
+the board or a client reboots. This machine has a scheduled nightly reboot, so
+"rare" is the wrong model.
+
+- **Held coins must be persisted.** The pending pot is real money; RAM-only
+  meant a power cut destroyed it — the exact bug the pot was built to fix.
+- **There is no RTC.** The clock resumes from a saved value and jumps when NTP
+  lands. Session expiry is absolute, so `expires_at - now` against a pre-sync
+  clock is wrong for every customer. `pisowifi.service` orders after
+  `time-sync.target`, and a checkpoint written each reconcile pass detects time
+  going backwards — surfaced on the dashboard, never silent.
+- **tc state belongs to the interface.** Recreating the LAN device (a dongle
+  unplug will do it) destroys the whole shaping tree. `limit()` then adds
+  classes under a parent that no longer exists and every unchecked tc call
+  fails quietly. `shaper.ensure_setup()` rebuilds the root only when it is
+  genuinely missing, since `setup()` tears down every client class.
+- **`_ip_for_mac()` returns None right after any reboot** — the neighbour table
+  is empty until the client sends a packet. A normal transient, but it must be
+  reported as pending rather than assumed applied.
+- **Verify, do not assume.** `shaper.limit()` reads the kernel back and returns
+  whether the class exists; the dashboard counts what the kernel is doing, not
+  what was asked for.
+
+Verified on hardware: reboot with a live session, a held coin and a cap in
+force — session time correct to the second, ₱7 restored, shaping rebuilt, zero
+failures logged.
+
+## 9. Testing this project
 
 `pytest tests` **runs nothing**. The files are standalone scripts that call
 `sys.exit()` at module level, so pytest aborts collection with an
@@ -284,7 +337,7 @@ in `db.py` is sound; do not "fix" it.
 
 ---
 
-## 9. Verification discipline
+## 10. Verification discipline
 
 The recurring theme: **every one of these failed silently.** Rules that follow
 from that:

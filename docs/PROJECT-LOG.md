@@ -173,6 +173,47 @@ Everything from the audit that software could close:
 8/8 suites pass. Not closed, because they are not software: fit the relay,
 settle the SD card / power question, redeploy to the board.
 
+---
+
+## 2026-08-25/26 — WiFi5-Soft cross-check, rate formula, speed limiting
+
+Read the reverse-engineering reports in `~/Desktop/Reverse Engineer` in full
+(~27k words) and cross-checked every actionable item against the code. Three
+had already been fixed since that Aug-1 review; two had not, and both are now
+closed (`2f5f42a`): the cloud dashboard published earnings when `DASH_PASSWORD`
+was unset, and the relay pin mapping is documented where it will be read.
+
+**The rate formula was wrong in every report, and in my first reading.**
+`vendo.json`'s `minute` is a per-peso multiplier applied to the highest tier
+<= the amount, not a total. Settled empirically in `PISOWIFI_RATE_FORMULA.md`
+against 10,860 session logs. I compounded it by assuming exact-match lookup and
+telling the user their ladder was non-monotonic when it is not. Corrected in
+SKILL.md §8a.
+
+`minutes_for()` now takes the best rate at or below the amount, which is
+monotonic by construction. On the live board P11 was granting 220 min where the
+commercial machine gives 264 — and the one recorded sale on that board is
+exactly P11, so a real customer was 44 minutes short.
+
+**Speed limiting** was fully plumbed since v2.3 but shipped as
+`default_speed: unlimited` with no UI, so every machine ran uncapped. Added the
+dashboard control. Testing it on hardware then found two more silent failures:
+the tc tree dies with the LAN device (a dongle unplug is enough) and never came
+back, and held coins lived only in RAM so a reboot destroyed them.
+
+**Restart survival, verified on hardware.** Reboot with a live session, a held
+coin and a cap in force: session time correct to the second (5654 -> 5536 s over
+118 s), P7 restored with a log line, shaping rebuilt on both directions, nft
+`allowed` set restored, zero failures. Also added `After=time-sync.target` and a
+clock checkpoint, because the board has no RTC and session expiry is absolute.
+
+### Live board state at end of session
+
+`pisowifi-42af48` · WAN `end0` 192.168.254.118 · LAN `enx00e04c6806a8` 10.0.0.1
+Real GPIO armed (gpio12 coin / gpio1 relay, `mock=False`), 9/9 suites green,
+`nft -c` valid, private-net isolation live at handle 43 above `@allowed` at 46.
+Bench mode (`wan_management`) is ON — `seal.sh` clears it.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

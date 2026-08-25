@@ -82,11 +82,41 @@ def setup(lan_if):
         "htb", "rate", ROOT_RATE)
 
 
+def _root_ready():
+    """True when the HTB root is armed on both shaping devices."""
+    if not HAVE_TC or not _LAN:
+        return False
+    for dev in (_LAN, IFB):
+        if "qdisc htb 1:" not in _tc("qdisc", "show", "dev", dev).stdout:
+            return False
+    return True
+
+
+def ensure_setup():
+    """Re-arm the root qdiscs if they have disappeared. Returns True if it did.
+
+    tc state belongs to the interface, so anything that recreates the LAN
+    device takes the entire shaping tree with it -- unplugging the USB-ethernet
+    dongle is enough, and on this project the dongle gets swapped. limit() then
+    adds classes under a parent that no longer exists, and because these tc
+    calls are not checked, every one fails quietly: paying customers run
+    unshaped and nothing reports it until someone restarts the service.
+
+    Only rebuilds when the root is genuinely missing, since setup() tears down
+    every existing client class.
+    """
+    if _LAN and not _root_ready():
+        setup(_LAN)
+        return True
+    return False
+
+
 def limit(ip, up, down):
     """Cap `ip` to `up`/`down` (rate strings, e.g. '5mbit'). Idempotent —
     replaces any existing cap for that IP."""
     if not HAVE_TC or not _LAN:
         return
+    ensure_setup()
     up = up or ROOT_RATE
     down = down or ROOT_RATE
     m = _minor(ip)

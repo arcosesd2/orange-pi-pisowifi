@@ -1646,6 +1646,10 @@ _last_prune = 0.0
 def _reconcile_once():
     global _last_prune
     shaper.configure(setting("gaming_priority"))
+    # Rebuild the shaping tree if the LAN device was recreated under us (a
+    # dongle unplug is enough). Cheap no-op when the root is already armed.
+    if shaper.ensure_setup():
+        app.logger.warning("shaper: root qdisc was missing, re-armed")
     wanted = {}
     for s in db.active_sessions():
         if s["paused_remaining"] is not None:

@@ -954,7 +954,22 @@ def admin():
                   unclaimed_events=slot.unclaimed_events,
                   relay_pin=setting("relay_gpio_pin") or 0,
                   hold_s=int(setting("uncredited_hold_s") or 0)),
+        speed=_speed_summary(),
     )
+
+
+def _speed_summary():
+    """Current per-client cap, in plain Mbps, for the dashboard control."""
+    prof = _resolve_speed(setting("default_speed"))
+    def mbit(v):
+        try:
+            return int(float(str(v).lower().replace("mbit", "").strip()))
+        except (TypeError, ValueError):
+            return 0
+    return {"enabled": bool(prof and prof.get("down")),
+            "down": mbit(prof.get("down")) if prof else 5,
+            "up": mbit(prof.get("up")) if prof else 3,
+            "shaped_now": len(shaper.active_ips()) if not MOCK else 0}
 
 
 @app.route("/admin/settings", methods=["POST"])
@@ -971,6 +986,44 @@ def admin_settings():
     if f.get("admin_password"):
         db.set_admin_password(f["admin_password"])
     _audit("settings updated")
+    return redirect("/admin")
+
+
+@app.route("/admin/speed", methods=["POST"])
+def admin_speed():
+    """Cap what one customer can take from a shared line.
+
+    Without a cap a single device streaming 4K or running a game download uses
+    the whole uplink and everyone else's paid time is worthless. The shaping
+    machinery has always been here (HTB + CAKE per client, upload via ifb0) but
+    shipped as `default_speed: unlimited`, and the only way to change it was to
+    edit a JSON file on a box the owner often cannot SSH into. This is that
+    switch, in the admin panel.
+    """
+    if not admin_ok():
+        return redirect("/admin/login")
+    f = request.form
+    profiles = dict(setting("speed_profiles") or {})
+    if f.get("speed_enabled") == "on":
+        try:
+            down = max(1, int(float(f.get("speed_down") or 5)))
+            up = max(1, int(float(f.get("speed_up") or 3)))
+        except ValueError:
+            return redirect("/admin")
+        profiles["default"] = {"up": f"{up}mbit", "down": f"{down}mbit"}
+        db.set_setting("speed_profiles", profiles)
+        db.set_setting("default_speed", "default")
+        _audit("speed limit set", f"{down}M down / {up}M up per client")
+    else:
+        db.set_setting("default_speed", "unlimited")
+        _audit("speed limit removed")
+    # Re-apply to everyone already online, so the change is felt immediately
+    # rather than only by the next customer.
+    if not MOCK:
+        now = time.time()
+        for s in db.active_sessions():
+            if s["paused_remaining"] is None and s["expires_at"] > now:
+                _apply_speed(s["mac"], s["speed"])
     return redirect("/admin")
 
 

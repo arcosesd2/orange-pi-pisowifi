@@ -157,6 +157,52 @@
     </form>
   </section>
 
+  <!-- ------------------------------------------------ speed ----------- -->
+  <section class="card">
+    <div class="card-head">
+      <h2>Speed limit per customer</h2>
+      <div class="spacer"></div>
+      {% if speed.enabled %}
+        <span class="badge ok">{{ speed.down }} / {{ speed.up }} Mbps</span>
+      {% else %}
+        <span class="badge warn">no limit</span>
+      {% endif %}
+    </div>
+    <p class="muted">
+      Everyone shares one line. Without a cap, one customer streaming 4K or
+      pulling a game update takes the whole connection and everybody else's
+      paid time is worthless. A cap keeps the machine usable when it is busy —
+      and busy is when you are earning.
+    </p>
+
+    <form method="post" action="/admin/speed">
+      <label class="check">
+        <input type="checkbox" name="speed_enabled" id="spEn" {{ 'checked' if speed.enabled }}>
+        <span>Limit each customer's speed</span>
+      </label>
+
+      <div class="job-grid" style="margin-top:12px">
+        <div><label for="spDown">Download per customer (Mbps)</label>
+          <input id="spDown" name="speed_down" type="number" min="1" max="1000"
+                 value="{{ speed.down }}"></div>
+        <div><label for="spUp">Upload per customer (Mbps)</label>
+          <input id="spUp" name="speed_up" type="number" min="1" max="1000"
+                 value="{{ speed.up }}"></div>
+      </div>
+      <p class="hint" id="spHint"></p>
+      <div class="actions">
+        <button>Save speed limit</button>
+        {% if speed.shaped_now %}
+          <span class="muted">{{ speed.shaped_now }} client{{ '' if speed.shaped_now == 1 else 's' }} shaped right now</span>
+        {% endif %}
+      </div>
+      <p class="hint">
+        Applies immediately to everyone already online, not just the next
+        customer. Uses CAKE, so the cap stays smooth instead of stuttering.
+      </p>
+    </form>
+  </section>
+
   <!-- ------------------------------------------------ remote ----------- -->
   <section class="card">
     <h2>Remote monitoring</h2>
@@ -305,6 +351,30 @@ Object.entries(TIERS).sort(function (a, b) { return a[0] - b[0]; })
 refreshEmpty();
 document.getElementById('mpp').addEventListener('input', updateMppHint);
 updateMppHint();
+
+// Turn the cap into the number the owner actually cares about: how many
+// customers the line carries at once before it starts feeling slow.
+function updateSpeedHint() {
+  const en = document.getElementById('spEn');
+  const d = parseInt(document.getElementById('spDown').value, 10);
+  const out = document.getElementById('spHint');
+  if (!out) return;
+  if (!en.checked) {
+    out.innerHTML = '<b>No limit.</b> One customer can take the whole line.';
+    return;
+  }
+  if (!d) { out.textContent = ''; return; }
+  const per = function (line) { return Math.max(1, Math.floor(line / d)); };
+  out.innerHTML = 'At ' + d + ' Mbps each: a 25 Mbps line serves about <b>' +
+    per(25) + '</b> at full speed, 50 Mbps about <b>' + per(50) +
+    '</b>, 100 Mbps about <b>' + per(100) + '</b>. Beyond that they share what is left.';
+}
+['spEn', 'spDown'].forEach(function (id) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', updateSpeedHint);
+  if (el) el.addEventListener('change', updateSpeedHint);
+});
+updateSpeedHint();
 
 async function sendNow(btn) {
   btn.disabled = true; btn.textContent = 'Sending...';

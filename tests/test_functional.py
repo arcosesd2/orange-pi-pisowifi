@@ -509,6 +509,24 @@ ok("subscriber can be disabled", r.status_code == 302)
 r = a.post("/admin/pppoe/remove", data={"csrf": tok, "user": "juan"})
 ok("subscriber removed", not any(x["user"] == "juan" for x in db.list_pppoe_accounts()))
 
+# One customer must not be able to take the whole shared line.
+r = a.post("/admin/speed", data={"csrf": tok, "speed_enabled": "on",
+                                 "speed_down": "6", "speed_up": "4"})
+ok("speed limit accepted", r.status_code == 302, str(r.status_code))
+ok("cap stored as a real profile",
+   main.setting("speed_profiles").get("default") == {"up": "4mbit", "down": "6mbit"},
+   str(main.setting("speed_profiles").get("default")))
+ok("cap is what new customers get", main.setting("default_speed") == "default",
+   str(main.setting("default_speed")))
+r = a.post("/admin/speed", data={"csrf": tok})          # unticked = no limit
+ok("speed limit can be turned off", main.setting("default_speed") == "unlimited",
+   str(main.setting("default_speed")))
+r = a.post("/admin/speed", data={"csrf": tok, "speed_enabled": "on",
+                                 "speed_down": "0", "speed_up": "-5"})
+ok("a nonsense cap is clamped, not stored",
+   main.setting("speed_profiles")["default"] == {"up": "1mbit", "down": "1mbit"},
+   str(main.setting("speed_profiles")["default"]))
+
 r = a.post("/admin/branding", data={"csrf": tok, "color": "#ff0000",
                                     "show_redeem": "on", "show_trial": "on"})
 ok("branding saved", r.status_code == 302)

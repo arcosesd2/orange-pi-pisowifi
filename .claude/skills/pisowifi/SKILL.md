@@ -160,6 +160,33 @@ iifname $LAN_IF ip daddr $GW_IP tcp dport 80 redirect to :$PORTAL_PORT   # alway
 iifname $LAN_IF ether saddr @allowed accept                              # exits here
 ```
 
+### 3d. Never write a `#@TOKEN@` in prose in the template
+
+`detect.sh` fills placeholders with `str.replace()`, which replaces **every**
+occurrence. The header comment documented `#@ANTI_TETHER@` by naming it, so the
+mention was substituted too.
+
+It hid indefinitely, because while the feature was off the replacement was `""`
+and blanking part of a comment changes nothing. The first time anyone enabled
+it, a whole nft chain was injected into the comment and the ruleset stopped
+parsing -- i.e. the bug only existed once the feature was switched on.
+
+    FAILS   # The #@ANTI_TETHER@ / #@FLOWTABLE@ tokens are filled in ...
+    WORKS   # The ANTI_TETHER / FLOWTABLE placeholders are filled in ...
+
+`tests/test_reachability.py` asserts every placeholder appears exactly once and
+alone on its line. That check was negative-tested; a guard nobody has watched
+fail is not a guard.
+
+### 3e. Reloading nftables flushes the runtime sets
+
+`systemctl restart nftables` reloads `/etc/nftables.conf`, which recreates
+`allowed` / `whitelist` / `blocked` **empty** -- every paying customer is
+disconnected at that instant. The app's reconcile pass puts them back (verified:
+a session with 1h32m left returned intact, matching the DB), but anything that
+reloads the ruleset must be followed by a reconcile, not left to the next timer
+tick.
+
 ### 3c. The installer can seal its own management path
 
 `iifname $WAN_IF drop` ends the input chain, so the moment nftables loads, the

@@ -214,10 +214,93 @@ Real GPIO armed (gpio12 coin / gpio1 relay, `mock=False`), 9/9 suites green,
 `nft -c` valid, private-net isolation live at handle 43 above `@allowed` at 46.
 Bench mode (`wan_management`) is ON — `seal.sh` clears it.
 
+---
+
+## 2026-08-26 — the coin slot was deaf, and everything said it was fine
+
+Reported as "it does not read my inserted coin". This turned out to be the most
+serious defect the project has had: **the machine accepted coins and credited
+nothing**, while every diagnostic reported health.
+
+### What was actually wrong
+
+`OPi.GPIO.add_event_detect()` arms the *deprecated sysfs* edge interface. On
+kernel 6.18.44-current-sunxi the kernel accepts the arming and never delivers
+an interrupt. Not once. No exception, no log line, no restart, no flag.
+
+All of this was true simultaneously with zero coins counted:
+
+```
+systemctl is-active pisowifi   active, 0 restarts
+/sys/class/gpio/gpio12         direction=in, edge=falling
+/proc/1024/fd/6                -> .../gpio12/value      (open, armed)
+slot.mock                      False        slot.gpio_error  None
+```
+
+### How it was found
+
+Level-polled the coin pin from a separate process while the app ran with its
+own fd open on the same pin. Five clean 50 ms pulses landed on the line:
+
+```
+edge @11.1388s 0 -> 1      edge @11.1889s 1 -> 0
+edge @12.9900s 0 -> 1      edge @13.0400s 1 -> 0
+   ... 5 pulses, ~50 ms wide, 1.4-2.5 s apart
+```
+
+The app's pending pot did not move off `[7, ...]`. Line pulses, app deaf —
+which separates "broken acceptor" from "broken kernel API" in one coin drop.
+That is the test to reach for; it is now SKILL.md §5a.
+
+### The fix (`86f2929`)
+
+The coin line no longer goes near `add_event_detect()`. It reads through
+libgpiod v2 character-device edge events (`python3-libgpiod`, installed on the
+board), with level polling as a fallback that is known to work here.
+
+The first deploy exposed a second trap: a **sysfs export outlives its process**
+and holds the line against the character device, so gpiod got `EBUSY` and the
+app silently fell back to polling. Left alone, every machine upgrading to this
+commit would have quietly never used the good backend. `_unexport()` now clears
+it first.
+
+Both edge directions are counted and surfaced on Diagnostics, because a line
+pulsing the wrong way looks exactly like a dead acceptor.
+
+### Verified with real money
+
+`P5 coin -> 120 minutes`, sale #3, credited 238 s after the gpiod backend armed
+— through a real insert window on the portal, at the correct P5 = 2 h tier.
+
+### Two hardware facts found in the traces
+
+- **The coin line is active-HIGH** (idles 0, pulses to 1), the opposite of the
+  README's PC817 + pull-up wiring. `falling` catches the trailing edge so it
+  works; `rising` is correct and should be set.
+- **The acceptor is in slow-pulse mode** — 1.4-2.5 s between pulses against
+  `pulse_end_gap_s = 0.7`, so one P5 coin arrives as five P1 trains. Totals
+  survive only because the denomination table is linear. Set the acceptor to
+  fast pulse, or raise the gap to ~3 s.
+
+### Also checked, at the user's request
+
+Portal UI sync is correct end to end: `/api/status` -> `slot.status(mac)`
+carries `open/busy/pesos/seconds_left/pending`, and `portal.html` renders all
+of them, polling at 1 s (5 s alongside SSE). Note the inserted total only
+appears in the *insert view* — with no window open the portal shows the pending
+note instead, which is why a coin dropped without tapping INSERT COIN looks
+like nothing happened even when it was counted.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.
-- [ ] Train the coin acceptor and verify denominations end to end.
+- [ ] Set the acceptor to **fast pulse** mode (gaps are 1.4-2.5 s now), or
+      raise `pulse_end_gap_s` to ~3 s so one coin is one train.
+- [ ] Set `coin_edge` to **rising** -- this harness is active-HIGH.
+- [ ] Verify the relay actually gates the acceptor. Note the README trap:
+      a WiFi5-Soft harness puts the relay on physical pin **5** (PA11),
+      not 11 (PA1); config currently says 11.
+- [ ] Train the coin acceptor and verify every denomination end to end.
 - [ ] Set admin password, rates, hotspot name; whitelist the owner's phone.
 - [ ] Then `.\provision.ps1 -Target <ip> -Seal -ZeroFill` to cut the master.
 - [ ] **Unresolved:** the read-only filesystem event. Suspect the buck converter

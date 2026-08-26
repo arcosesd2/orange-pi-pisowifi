@@ -195,18 +195,76 @@ work; `seal.sh` forces it off so no master image ships that way.
 
 ---
 
-## 5. GPIO on Debian 13 — the feared problem did *not* happen
+## 5. GPIO on Debian 13
 
-Kernel **6.18.44-current-sunxi still exposes `/sys/class/gpio`**, and
-`OPi.GPIO` arms pin 3 with edge detection successfully. Coins count. Do not
-assume Trixie breaks the coin slot.
+### 5a. `add_event_detect()` arms cleanly and never fires — NEVER use it
 
-It is still worth guarding: `CoinSlot._setup_gpio()` runs at **import time**
-and only `ImportError` was caught. The library can import fine and still throw
-`OSError` against the kernel's GPIO layout (this H3 exposes both `gpiochip0`
-and `gpiochip352`). An escaping exception there kills the entire app — portal,
-admin, vouchers, sessions — over a coin acceptor. Catch it, fall back to mock,
-log the reason.
+**This is the worst bug this project has had.** The machine took coins and gave
+nothing back, and every diagnostic said it was healthy.
+
+`OPi.GPIO.add_event_detect()` uses the **deprecated sysfs edge interface**.
+Kernel 6.18.44-current-sunxi accepts the arming, writes `edge=falling`, keeps
+the fd open — and delivers no interrupt, ever. There is no exception, no log
+line, no restart, no degraded flag. `/sys/class/gpio` still *exists* on Trixie,
+which is what made this so slow to find: the earlier note here said "coins
+count, Trixie is fine", and that was wrong.
+
+Everything below was true **while not one coin was being counted**:
+
+```
+systemctl is-active pisowifi   -> active, 0 restarts
+/sys/class/gpio/gpio12         -> direction=in, edge=falling
+/proc/<pid>/fd                 -> open fd on gpio12/value
+slot.mock                      -> False, gpio_error None
+```
+
+    FAILS   GPIO.add_event_detect(pin, edge, callback=..., bouncetime=...)
+    WORKS   gpiod.request_lines(..., LineSettings(edge_detection=Edge.BOTH))
+            or level-polling /sys/class/gpio/gpioN/value at 1 ms
+
+**How to catch this class of bug:** poll the pin's `value` file from a separate
+process while the app runs. If the line transitions and the app's counter does
+not, the delivery mechanism is dead, not the hardware. That one test separated
+"broken acceptor" from "broken kernel API" in a single coin drop.
+
+### 5b. A sysfs export holds the line against libgpiod
+
+`/sys/class/gpio/gpioN` **outlives the process that created it**. While it
+exists, `gpiod.request_lines()` on that line returns `OSError: [Errno 16]
+Device or resource busy`.
+
+This bites exactly once and then hides: the first restart after switching to
+libgpiod falls back to polling, logs one line, and works — so the machine looks
+fine and never uses the good backend again. Unexport before requesting.
+
+### 5c. Physical pin != sysfs number != libgpiod offset
+
+`HEADER` in `diagnostics.py` maps physical pin -> `PA12`-style name. For
+gpiochip0 (H3, 224 lines, PA..PG at 32 per bank) the sysfs number and the
+libgpiod offset are both `bank*32 + n`, so `PA12` is `12` for both — but only
+because the coin pin is in bank A. Do not generalise that to PC/PD pins.
+
+### 5d. Guard the arming path — it runs at import time
+
+`CoinSlot._setup_gpio()` runs at **import time** and only `ImportError` was
+caught. The library can import fine and still throw `OSError` against the
+kernel's GPIO layout (this H3 exposes both `gpiochip0` and `gpiochip352`). An
+escaping exception there kills the entire app — portal, admin, vouchers,
+sessions — over a coin acceptor. Catch it, fall back, log the reason.
+
+### 5e. Read the signal before trusting the config
+
+Measured on this board: the coin line **idles LOW and pulses HIGH** for ~50 ms,
+the opposite of the README's documented PC817 + pull-up wiring. `falling` still
+works (it catches the trailing edge) so it hid, but `rising` is correct.
+
+Count **both** edge directions and show them separately. A line pulsing the
+opposite way to `coin_edge` is otherwise indistinguishable from a dead
+acceptor, and both look like "the coin slot is broken".
+
+Also measured: 1.4–2.5 s between pulses against `pulse_end_gap_s = 0.7` — the
+acceptor is in slow-pulse mode, so one ₱5 coin arrives as five ₱1 trains. The
+totals survive only because the denomination table is linear. That is luck.
 
 ---
 

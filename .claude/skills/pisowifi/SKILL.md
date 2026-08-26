@@ -160,6 +160,14 @@ iifname $LAN_IF ip daddr $GW_IP tcp dport 80 redirect to :$PORTAL_PORT   # alway
 iifname $LAN_IF ether saddr @allowed accept                              # exits here
 ```
 
+### 3c. The installer can seal its own management path
+
+`iifname $WAN_IF drop` ends the input chain, so the moment nftables loads, the
+board is unreachable from the uplink — including by the script that just
+installed it. `wan_management` (config toggle, `install.sh --wan-management`,
+rendered via the `#@WAN_MGMT@` token) keeps SSH/portal/ICMP open for bench
+work; `seal.sh` forces it off so no master image ships that way.
+
 ### 3d. Never write a `#@TOKEN@` in prose in the template
 
 `detect.sh` fills placeholders with `str.replace()`, which replaces **every**
@@ -187,13 +195,6 @@ a session with 1h32m left returned intact, matching the DB), but anything that
 reloads the ruleset must be followed by a reconcile, not left to the next timer
 tick.
 
-### 3c. The installer can seal its own management path
-
-`iifname $WAN_IF drop` ends the input chain, so the moment nftables loads, the
-board is unreachable from the uplink — including by the script that just
-installed it. `wan_management` (config toggle, `install.sh --wan-management`,
-rendered via the `#@WAN_MGMT@` token) keeps SSH/portal/ICMP open for bench
-work; `seal.sh` forces it off so no master image ships that way.
 
 ---
 

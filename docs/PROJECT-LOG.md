@@ -325,6 +325,75 @@ Accepted, not fixable in software: MAC spoofing inherits a paying customer's
 time; DNS is open to unpaid clients for captive-portal detection and is
 tunnelable at low bandwidth.
 
+---
+
+## 2026-08-26 (later) — production lockdown, and anti-tethering backed out
+
+### Done and kept
+
+- **SSH is key-only.** `/etc/ssh/sshd_config.d/99-pisowifi.conf`, verified on a
+  fresh connection before trusting it. `/etc/shadow` is cloned onto every card,
+  so a password was a fleet-wide secret.
+- **The plaintext admin password is out of `config.json`.** The DB holds the
+  PBKDF2 hash, so the seed was dead weight — but it was the live credential in
+  clear text. Reset to `changeme`, not `""`: if the hash is ever lost the
+  machine must fall back to the forced-password-change flow, not to a working
+  empty credential.
+- **`admin_lan_access: "off"`** — a new mode. The customer network may never
+  reach `/admin`, whitelist or not. Verified live: customer LAN 403, uplink 302,
+  customer portal still 200.
+- **`wan_admin`** — admin page only, no SSH, on the uplink port, and it survives
+  sealing. Without it, `admin_lan_access=off` plus the `wan_management=off` that
+  `seal.sh` forces would leave admin reachable from nowhere at all.
+
+Note the limit honestly: Wi-Fi clients and anything cabled into the AP arrive on
+the *same* interface in the *same* subnet. The box cannot tell a cable from a
+radio down there. "Admin only over the cable" means the uplink port, which is
+the only distinction this hardware supports.
+
+### Latent bug found: placeholders substituted inside their own documentation
+
+The template header named `#@ANTI_TETHER@` in prose while documenting it, and
+`detect.sh` substitutes with `str.replace()` — which replaces *every*
+occurrence. It hid for as long as `anti_tether` was false, because substituting
+`""` into a comment is invisible. The first time the feature was switched on, a
+whole nft chain was injected into that comment:
+
+```
+# from the hardware actually present. The     chain mangle_post {
+        type filter hook postrouting priority mangle; policy accept;
+...
+    } /  /
+```
+
+`test_reachability.py` now asserts every placeholder appears exactly once and
+alone on its line, and the check was negative-tested by reintroducing the bug.
+
+### Anti-tethering: implemented, demonstrated, then backed out
+
+Egress `ip ttl set 1` plus an opt-in strict rule dropping client packets whose
+TTL shows a hotspot forwarded them.
+
+On hardware it did discriminate correctly. The test phone showed two
+populations: **TTL 64** for its own traffic (portal polls *and* its own
+internet), and **TTL 63** with retransmits (same IP ID retried) for traffic
+that had crossed one forwarding hop.
+
+It was **reverted at the owner's request** before that was fully confirmed. The
+strict counter reached 979 packets within minutes, and whether that was a
+tethered device retrying or the customer being harmed was not yet established.
+Backing out was the right call — this machine takes money, and an unproven rule
+that can cut off a paying customer does not belong in front of one.
+
+Board state after revert, verified: `mangle_post` gone, zero TTL rules in the
+whole ruleset, forward chain back to its original handles, paid session
+restored into the `allowed` set by reconcile (1h32m left, matching the DB), coin
+input still armed via gpiod, portal 200.
+
+`anti_tether` and `anti_tether_strict` both ship **false**. To retry: enable the
+egress half alone first — it breaks hotspot sharing on its own, because the
+tethered device's replies never come back, and it cannot cut anyone off.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

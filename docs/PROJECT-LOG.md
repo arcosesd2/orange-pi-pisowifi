@@ -291,6 +291,40 @@ appears in the *insert view* — with no window open the portal shows the pendin
 note instead, which is why a coin dropped without tapping INSERT COIN looks
 like nothing happened even when it was counted.
 
+### Production readiness — checked live 2026-08-26
+
+Holds up (verified against the running ruleset):
+
+- Customers cannot reach the owner's router or any private network. Handles
+  43/45 reject RFC1918 + IPv6 private destinations, **above** `@allowed accept`
+  at 46, so a fully paid customer is still blocked.
+- The Pi exposes only DHCP 67, DNS 53, portal 8080 and ICMP echo to customers;
+  anti-spoof (`ip saddr != 10.0.0.0/24 drop`), SYN rate limit, conntrack cap
+  2000/IP, mail ports 25/465/587 dropped so the uplink cannot be used to relay
+  spam.
+- Admin auth is PBKDF2 200k + CSRF + escalating lockout (1,2,4,8..60 min).
+
+Blocks production until fixed:
+
+1. **Customer-to-customer traffic is not filtered by this machine and cannot
+   be.** One L2 segment on 10.0.0.0/24 — the AP switches it, so it never
+   reaches the forward chain. Depends entirely on **AP client isolation on the
+   CF-EW73**. Unverified. Without it: ARP spoofing, MITM, device scanning.
+2. **Bench mode is ON** — `iifname end0 tcp dport {22,8080} accept`. `seal.sh`
+   clears it.
+3. **/admin is reachable from the customer LAN** because 0 devices are
+   whitelisted, and `_admin_lan_denied()` deliberately opens up on a machine
+   with an empty whitelist so a fresh board cannot lock itself out. Whitelisting
+   the owner's phone flips it to whitelist-only.
+4. **SSH password auth is on** and `/etc/shadow` is cloned to every card —
+   `seal.sh --lock-ssh`.
+5. Admin password is still the install-minted one, plaintext in
+   `/etc/pisowifi/config.json` (root-only).
+
+Accepted, not fixable in software: MAC spoofing inherits a paying customer's
+time; DNS is open to unpaid clients for captive-portal detection and is
+tunnelable at low bandwidth.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

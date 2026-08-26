@@ -5,6 +5,8 @@
   "auto_detect_interfaces": true,
   "_comment_wan_management": "true keeps SSH/portal/ping reachable on the UPLINK side. Bench bring-up only; seal.sh forces it false.",
   "wan_management": false,
+  "_comment_wan_admin": "true serves the ADMIN PAGE ONLY (no SSH) on the uplink port, and survives seal.sh. Required when admin_lan_access is off, otherwise sealing leaves admin unreachable.",
+  "wan_admin": false,
   "lan_if": "eth1",
   "wan_if": "eth0",
   "lan_vlan": 0,
@@ -45,7 +47,9 @@
   "watchdog_reboot": false,
 
   "gaming_priority": false,
+  "_comment_anti_tether": "TTL=1 toward customers so a paid session cannot be re-shared over a phone hotspot. anti_tether_strict additionally drops client packets whose TTL shows they were forwarded -- effective against a phone that rewrites TTL, but it fails CLOSED for an unusual stack or an AP that routes instead of bridges.",
   "anti_tether": false,
+  "anti_tether_strict": false,
   "flow_offload": false,
 
   "trial_enabled": false,

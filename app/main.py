@@ -58,6 +58,10 @@ DEFAULTS = {
     # deployed machine and wrong for a bench board you still have to
     # finish building. seal.sh forces this back to false.
     "wan_management": False,
+    # Admin page (no SSH) on the uplink port. Survives sealing, unlike
+    # wan_management -- needed when admin_lan_access is "off", or admin
+    # would be reachable from nowhere at all.
+    "wan_admin": False,
     # Default topology: eth0 = internet uplink (onboard), eth1 = antenna/LAN
     # (USB-ethernet). Set lan_if to wlan0 only for the Pi-broadcasts-its-own-WiFi
     # (hostapd) topology.
@@ -111,6 +115,10 @@ DEFAULTS = {
     # QoS / firewall toggles (some are consumed by install.sh from config.json)
     "gaming_priority": False,      # CAKE diffserv4 (prioritize game/VoIP)
     "anti_tether": False,          # TTL=1 so paid WiFi can't be re-shared
+    # Also drop client packets whose TTL shows a hotspot forwarded them.
+    # Only helps against a phone that rewrites TTL, and fails CLOSED for
+    # an unusual stack or a routing AP, so it is opt-in on top.
+    "anti_tether_strict": False,
     "flow_offload": False,         # kernel fast-path (scope vs QoS — see README)
     # free trial
     "trial_enabled": False,
@@ -257,20 +265,43 @@ def _from_customer_lan():
         return False
 
 
+_RECOVER = ("To recover a lockout, set \"admin_lan_access\": \"any\" in "
+            "/etc/pisowifi/config.json and restart the pisowifi service.")
+
+
 def _admin_lan_denied():
-    """Why (if at all) this request must not reach /admin. None = allowed."""
-    if (setting("admin_lan_access") or "whitelist") == "any":
+    """Why (if at all) this request must not reach /admin. None = allowed.
+
+    Three modes:
+      any        - no restriction (recovery setting).
+      whitelist  - customer network may reach admin only from a whitelisted
+                   MAC. Opens up while the whitelist is empty, so a fresh
+                   machine cannot lock out its own owner.
+      off        - the customer network may NEVER reach admin, whitelist or
+                   not. Admin is then reachable only on another interface:
+                   the wired uplink port, the box itself, or Tailscale.
+
+    Note what "off" can and cannot do. Wi-Fi clients and anything cabled into
+    the same switch/AP arrive on the *same* interface in the *same* subnet, so
+    the box cannot tell a cable from a radio down there -- "off" separates the
+    customer network from the uplink port, not cable from Wi-Fi.
+    """
+    mode = setting("admin_lan_access") or "whitelist"
+    if mode == "any":
         return None
     if not _from_customer_lan():
         return None                      # box itself / Tailscale / other iface
+    if mode == "off":
+        return ("Admin is not reachable from the customer network on this "
+                "machine.\n\nOpen it from the wired uplink port or from the "
+                "machine itself.\n\n" + _RECOVER)
     if not db.has_whitelist():
         return None                      # fresh machine — see note above
     if db.is_whitelisted(client_mac()):
         return None
     return ("Admin is not reachable from the customer network on this machine.\n\n"
             "Open it from a whitelisted device, from the machine itself, or over "
-            "Tailscale. To recover a lockout, set \"admin_lan_access\": \"any\" in "
-            "/etc/pisowifi/config.json and restart the pisowifi service.")
+            "Tailscale.\n\n" + _RECOVER)
 
 
 @app.before_request

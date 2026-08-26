@@ -211,13 +211,32 @@ if os.path.exists(src):
     # replace of "10.0.0.1" would also rewrite the "10.0.0.1" inside a longer
     # address such as 10.0.0.10 if one ever appears in this template.
     s = re.sub(r"^(define GW_IP\s*=\s*).*$", r"\g<1>" + gw, s, count=1, flags=re.M)
-    anti = ""
+    # Anti-tethering has two halves and they are not equally safe.
+    #
+    # Egress TTL=1 is the effective one and it cannot lock anybody out: the
+    # paying device is the last hop so it receives normally, but if it forwards
+    # the packet to a tethered device the TTL hits 0 and dies. On its own this
+    # already breaks hotspot sharing in both directions, because the tethered
+    # device's replies never come back.
+    #
+    # The strict half drops client packets whose TTL shows they were forwarded.
+    # It only adds anything against a rooted phone that rewrites TTL on
+    # forward, and it fails CLOSED -- a client with an unusual initial TTL is
+    # cut off entirely, and on a deployment where the AP routes rather than
+    # bridges it would cut off everyone. Hence the separate opt-in, and the
+    # counter, so a blocked device shows up as a number instead of a mystery.
+    anti = antifwd = ""
     if cfg.get("anti_tether"):
         anti = ("    chain mangle_post {\n"
                 "        type filter hook postrouting priority mangle; policy accept;\n"
                 "        oifname %s ip ttl set 1\n"
                 "        oifname %s ip6 hoplimit set 1\n"
                 "    }" % (lan_dev, lan_dev))
+        if cfg.get("anti_tether_strict"):
+            antifwd = (
+                "        iifname %s ip ttl != { 64, 128, 255 } counter drop\n"
+                "        iifname %s ip6 hoplimit != { 64, 128, 255 } counter drop"
+                % (lan_dev, lan_dev))
     flowt = offl = ""
     if cfg.get("flow_offload"):
         flowt = ("    flowtable ft {\n"
@@ -225,16 +244,29 @@ if os.path.exists(src):
                  "        devices = { %s, %s }\n"
                  "    }" % (lan_dev, wan))
         offl = "        ip protocol { tcp, udp } flow add @ft"
-    # Bench bring-up escape hatch. Without it the uplink is sealed the instant
-    # the installer finishes, so nothing can verify the machine it just built.
+    # Two separate doors on the uplink, because they have different lifetimes.
+    #
+    # wan_management is the bench bring-up escape hatch: SSH + portal + ping.
+    # Without it the uplink is sealed the instant the installer finishes, so
+    # nothing can verify the machine it just built. seal.sh forces it off.
+    #
+    # wan_admin is a production setting: the admin page only, no SSH. It exists
+    # because "admin must not be reachable from the customer network" leaves
+    # the uplink as the only way in -- this board has two ports, and Wi-Fi
+    # clients and anything cabled into the AP share the customer one. Pairing
+    # admin_lan_access=off with wan_management=off (which sealing does) would
+    # otherwise leave admin reachable from nowhere at all.
+    port = int(cfg.get("portal_port") or 8080)
     wanmgmt = ""
     if cfg.get("wan_management"):
-        port = int(cfg.get("portal_port") or 8080)
         wanmgmt = ("        iifname %s tcp dport { 22, %d } accept\n"
                    "        iifname %s icmp type echo-request accept"
                    % (wan, port, wan))
+    elif cfg.get("wan_admin"):
+        wanmgmt = "        iifname %s tcp dport %d accept" % (wan, port)
     s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt) \
-         .replace("#@OFFLOAD@", offl).replace("#@WAN_MGMT@", wanmgmt)
+         .replace("#@OFFLOAD@", offl).replace("#@WAN_MGMT@", wanmgmt) \
+         .replace("#@ANTI_TETHER_FWD@", antifwd)
     write("/etc/nftables.conf", s)
 
 # -- dnsmasq ----------------------------------------------------------------

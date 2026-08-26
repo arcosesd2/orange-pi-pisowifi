@@ -38,9 +38,38 @@ def render():
     s = open(CONF, encoding="utf-8").read()
     s = s.replace("eth0", WAN).replace("wlan0", LAN).replace("10.0.0.0/24", NET)
     s = re.sub(r"^(define GW_IP\s*=\s*).*$", r"\g<1>" + GW, s, count=1, flags=re.M)
-    for token in ("#@ANTI_TETHER@", "#@FLOWTABLE@", "#@OFFLOAD@", "#@WAN_MGMT@"):
+    for token in TOKENS:
         s = s.replace(token, "")
     return s
+
+
+TOKENS = ("#@ANTI_TETHER@", "#@ANTI_TETHER_FWD@", "#@FLOWTABLE@",
+          "#@OFFLOAD@", "#@WAN_MGMT@")
+
+
+def check_tokens():
+    """Each placeholder must appear exactly once, alone on its line.
+
+    detect.sh substitutes with str.replace(), which replaces *every* match. The
+    template header used to name #@ANTI_TETHER@ in prose while documenting it,
+    so enabling anti_tether injected a whole nft chain into that comment and the
+    ruleset stopped parsing. It hid for months because substituting "" into a
+    comment is invisible -- the bug only existed once the feature was switched
+    on, which is the worst time to find it.
+    """
+    problems = []
+    lines = open(CONF, encoding="utf-8").read().splitlines()
+    for token in TOKENS:
+        hits = [(n, ln) for n, ln in enumerate(lines, 1) if token in ln]
+        if len(hits) != 1:
+            problems.append("%s appears %d times (want 1): lines %s"
+                            % (token, len(hits), [n for n, _ in hits]))
+            continue
+        n, ln = hits[0]
+        if ln.strip() != token:
+            problems.append("%s on line %d is not alone on its line: %r"
+                            % (token, n, ln))
+    return problems
 
 
 def chain(text, name):
@@ -187,6 +216,15 @@ def client_reaches_internet(text, mac_in):
 def main():
     text = render()
     fails = []
+
+    print("\n=== Template placeholders are substitutable exactly once ===")
+    for problem in check_tokens():
+        print("  %-58s %s" % (problem, "FAIL"))
+        fails.append(problem)
+    else:
+        if not fails:
+            print("  %-58s %s" % ("all %d placeholders unique and on their own line"
+                                  % len(TOKENS), "ok"))
 
     def check(desc, got, want):
         ok = want in got

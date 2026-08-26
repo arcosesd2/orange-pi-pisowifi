@@ -22,9 +22,12 @@ to python3-libgpiod (gpiod.request_lines with edge detection) — the rest of
 this module is hardware-agnostic.
 """
 import collections
+import datetime
 import sys
 import threading
 import time
+
+from diagnostics import HEADER
 
 try:
     import orangepi.one
@@ -34,9 +37,216 @@ except ImportError:
     GPIO = None
     HAVE_GPIO = False
 
+try:
+    import gpiod
+    from gpiod.line import Bias, Edge
+    HAVE_GPIOD = True
+except ImportError:
+    gpiod = None
+    HAVE_GPIOD = False
+
 # cfg keys that require tearing down / re-arming the GPIO when changed
 _GPIO_KEYS = ("coin_gpio_pin", "coin_edge", "coin_bounce_ms",
               "relay_gpio_pin", "relay_active_low")
+
+# ---------------------------------------------------------------------------
+# Coin pulse input
+#
+# OPi.GPIO's add_event_detect() arms the *deprecated sysfs* edge interface.
+# On this board's kernel (6.18.44-current-sunxi) the kernel accepts the arming
+# and then never delivers. Proven on hardware: five clean 50 ms pulses were
+# captured on the coin line by level-polling that very pin, while the app held
+# an open fd on the same pin with edge=falling -- and the app counted zero. No
+# exception, no log line, no restart. Coins simply stopped existing, which is
+# the worst failure this machine has: it takes money and gives nothing back.
+#
+# So the coin line never goes through add_event_detect() again. Two backends,
+# in preference order:
+#
+#   gpiod - libgpiod v2 character device, interrupt driven. The supported
+#           interface on this kernel, and the one sysfs was deprecated for.
+#   poll  - level polling of the sysfs value file. Needs no packages, and is
+#           exactly what did capture the pulses above.
+#
+# Both count every edge they see, both directions, so the diagnostics page can
+# show the input is alive instead of leaving it to be inferred from money not
+# arriving. An input that stops working must say so.
+# ---------------------------------------------------------------------------
+
+_POLL_S = 0.001          # 1 ms; a coin pulse on this acceptor is ~50 ms wide
+_BANKS = "ABCDEFG"       # H3 gpiochip0 exposes PA..PG, 32 lines per bank
+_CHIP = "/dev/gpiochip0"
+
+
+def _line_offset(pin_name):
+    """'PA12' -> line offset on gpiochip0 (which is also its sysfs number)."""
+    return _BANKS.index(pin_name[1]) * 32 + int(pin_name[2:])
+
+
+def _unexport(sysfs_n):
+    """Drop a stale sysfs export of the coin line.
+
+    A sysfs-exported line is held against the character device, so libgpiod
+    gets EBUSY and the machine silently drops to the polling backend for the
+    rest of its life. The export outlives the process that made it, so this
+    happens on every restart after an unclean exit -- and on the very first
+    restart after upgrading from the old add_event_detect() code, which is
+    exactly when it matters. Only ever called for the pin this app owns.
+    """
+    import os
+    if not os.path.exists(f"/sys/class/gpio/gpio{sysfs_n}"):
+        return
+    try:
+        with open("/sys/class/gpio/unexport", "w") as f:
+            f.write(str(sysfs_n))
+        time.sleep(0.05)
+    except OSError:
+        pass
+
+
+class _CoinInput:
+    """Shared bookkeeping and debounce for both backends.
+
+    `want_rising` selects which edge is credited as a pulse; the other edge is
+    still counted, because knowing the line pulses the opposite way to the
+    configuration is the difference between "no coin" and "wrong edge".
+    """
+
+    name = "?"
+
+    def __init__(self, on_edge, want_rising, bounce_ms):
+        self._on_edge = on_edge
+        self._want_rising = bool(want_rising)
+        self._bounce_s = max(0, int(bounce_ms)) / 1000.0
+        self.rising = 0
+        self.falling = 0
+        self.counted = 0
+        self.last_at = None
+        self.error = None
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _emit(self, rising):
+        if rising:
+            self.rising += 1
+        else:
+            self.falling += 1
+        if rising != self._want_rising:
+            return
+        now = time.monotonic()
+        if self.last_at is not None and now - self.last_at < self._bounce_s:
+            return                       # contact bounce, not a second coin
+        self.last_at = now
+        self.counted += 1
+        self._on_edge()
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def close(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+
+    def level(self):
+        return None
+
+    def _run(self):
+        raise NotImplementedError
+
+
+class _GpiodInput(_CoinInput):
+    """libgpiod v2 edge events -- interrupt driven, no polling."""
+
+    name = "gpiod"
+
+    def __init__(self, on_edge, want_rising, pin_name, bounce_ms):
+        super().__init__(on_edge, want_rising, bounce_ms)
+        self._offset = _line_offset(pin_name)
+        # Debounce is left to _emit rather than the kernel: the same rule then
+        # applies to both backends, so behaviour does not change with the
+        # backend that happens to be available.
+        self._req = gpiod.request_lines(
+            _CHIP,
+            consumer="pisowifi-coin",
+            config={self._offset: gpiod.LineSettings(
+                edge_detection=Edge.BOTH, bias=Bias.AS_IS)},
+        )
+
+    def level(self):
+        try:
+            from gpiod.line import Value
+            return 1 if self._req.get_value(self._offset) == Value.ACTIVE else 0
+        except Exception:
+            return None
+
+    def _run(self):
+        wait = datetime.timedelta(milliseconds=200)
+        while not self._stop.is_set():
+            try:
+                if not self._req.wait_edge_events(wait):
+                    continue
+                for ev in self._req.read_edge_events():
+                    self._emit(ev.event_type == gpiod.EdgeEvent.Type.RISING_EDGE)
+            except Exception as e:                      # pragma: no cover
+                self.error = f"{type(e).__name__}: {e}"
+                print(f"coinslot: gpiod reader died: {self.error}",
+                      file=sys.stderr, flush=True)
+                return
+
+    def close(self):
+        super().close()
+        try:
+            self._req.release()
+        except Exception:
+            pass
+
+
+class _PollInput(_CoinInput):
+    """Level polling of the sysfs value file.
+
+    Fallback for when libgpiod is not installed. The pin must already be
+    exported as an input by the caller.
+    """
+
+    name = "poll"
+
+    def __init__(self, on_edge, want_rising, sysfs_n, bounce_ms):
+        super().__init__(on_edge, want_rising, bounce_ms)
+        self._fh = open(f"/sys/class/gpio/gpio{sysfs_n}/value")
+        self._last = self._read()
+
+    def _read(self):
+        self._fh.seek(0)
+        return self._fh.read().strip()
+
+    def level(self):
+        try:
+            return int(self._read())
+        except Exception:
+            return None
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                v = self._read()
+            except Exception as e:                      # pragma: no cover
+                self.error = f"{type(e).__name__}: {e}"
+                print(f"coinslot: poll reader died: {self.error}",
+                      file=sys.stderr, flush=True)
+                return
+            if v != self._last:
+                self._last = v
+                self._emit(v == "1")
+            time.sleep(_POLL_S)
+
+    def close(self):
+        super().close()
+        try:
+            self._fh.close()
+        except Exception:
+            pass
 
 
 class CoinSlot:
@@ -82,6 +292,7 @@ class CoinSlot:
         self.unclaimed_events = 0
 
         self.gpio_error = None
+        self.coin_input = None
         if not self.mock:
             # The import guard above only catches ImportError. OPi.GPIO can
             # import perfectly well and still fail here against the kernel's
@@ -109,21 +320,44 @@ class CoinSlot:
         GPIO.setwarnings(False)
         GPIO.setmode(orangepi.one.BOARD)
         pin = int(self.cfg["coin_gpio_pin"])
-        GPIO.setup(pin, GPIO.IN)
-        edge = GPIO.RISING if self.cfg.get("coin_edge") == "rising" else GPIO.FALLING
-        GPIO.add_event_detect(
-            pin, edge, callback=self._pulse_cb,
-            bouncetime=int(self.cfg.get("coin_bounce_ms", 30)),
-        )
+        name = (HEADER.get(pin) or (None, None, None))[0]
+        if not name or not name.startswith("P"):
+            raise ValueError(f"physical pin {pin} is not a GPIO")
+        want_rising = self.cfg.get("coin_edge") == "rising"
+        bounce = int(self.cfg.get("coin_bounce_ms", 30))
+
+        # The relay is a plain output and OPi.GPIO drives it correctly; only
+        # the coin line's *edge detection* was broken, so only it moves.
         if self.cfg.get("relay_gpio_pin"):
             GPIO.setup(int(self.cfg["relay_gpio_pin"]), GPIO.OUT)
 
+        self.coin_input = None
+        if HAVE_GPIOD:
+            try:
+                _unexport(_line_offset(name))
+                self.coin_input = _GpiodInput(
+                    self._pulse_cb, want_rising, name, bounce)
+            except Exception as e:
+                # Busy line, missing chip, permissions -- fall through to
+                # polling rather than leave the machine unable to take money.
+                print(f"coinslot: gpiod unavailable on {name} "
+                      f"({type(e).__name__}: {e}); falling back to polling",
+                      file=sys.stderr, flush=True)
+        if self.coin_input is None:
+            GPIO.setup(pin, GPIO.IN)          # exports the sysfs value file
+            self.coin_input = _PollInput(
+                self._pulse_cb, want_rising, _line_offset(name), bounce)
+        self.coin_input.start()
+        print(f"coinslot: coin input armed on physical pin {pin} ({name}) via "
+              f"{self.coin_input.name}, counting "
+              f"{'rising' if want_rising else 'falling'} edges",
+              file=sys.stderr, flush=True)
+
     def _teardown_gpio(self, old):
-        try:
-            GPIO.remove_event_detect(int(old["coin_gpio_pin"]))
-        except Exception:
-            pass
-        time.sleep(0.1)  # OPi.GPIO's event thread touches sysfs on exit
+        if self.coin_input:
+            self.coin_input.close()
+            self.coin_input = None
+        time.sleep(0.1)  # let the reader thread let go of sysfs before cleanup
         for key in ("coin_gpio_pin", "relay_gpio_pin"):
             if old.get(key):
                 try:
@@ -167,14 +401,11 @@ class CoinSlot:
 
     def coin_level(self):
         """Diagnostics: current logic level of the coin input pin (None in mock)."""
-        if self.mock:
+        if self.mock or not self.coin_input:
             return None
-        try:
-            return int(GPIO.input(int(self.cfg["coin_gpio_pin"])))
-        except Exception:
-            return None
+        return self.coin_input.level()
 
-    def _pulse_cb(self, _channel):
+    def _pulse_cb(self):
         with self._lock:
             self._train += 1
             self.total_pulses += 1
@@ -316,9 +547,23 @@ class CoinSlot:
             if self.last_train:
                 last = dict(self.last_train)
                 last["ago_s"] = round(now - last.pop("at"), 1)
+            ci = self.coin_input
             return {
                 "mock": self.mock,
                 "level": self.coin_level(),
+                # Which backend is actually reading the line, and what it has
+                # seen. `edges_other` counting up while `total_pulses` stays at
+                # zero means the line pulses the opposite way to `coin_edge` --
+                # the one symptom that otherwise looks identical to a dead
+                # acceptor.
+                "input_backend": ci.name if ci else None,
+                "input_error": ci.error if ci else None,
+                "edges_counted": ci.counted if ci else 0,
+                "edges_rising": ci.rising if ci else 0,
+                "edges_falling": ci.falling if ci else 0,
+                "edges_other": (
+                    (ci.rising if self.cfg.get("coin_edge") != "rising"
+                     else ci.falling) if ci else 0),
                 "total_pulses": self.total_pulses,
                 "train": self._train,
                 "last_train": last,

@@ -5,10 +5,49 @@ Access = membership in the `allowed` set of table inet pisowifi
 expires paid time on its own — this module only adds/removes elements.
 """
 import ipaddress
+import os
 import re
 import subprocess
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+
+DETECT = "/usr/local/sbin/pisowifi-detect.sh"
+NFT_CONF = "/etc/nftables.conf"
+
+
+def rerender():
+    """Re-render the ruleset from config and load it. Returns (ok, error).
+
+    Needed by any setting that lives in the ruleset rather than the database --
+    the tethering rules, the uplink doors -- because editing config.json alone
+    changes nothing until the detector rewrites /etc/nftables.conf.
+
+    **Loading flushes every runtime set.** `allowed`, `whitelist`, `blocked`
+    and `walled` come back empty, which disconnects every paying customer at
+    that instant. The caller must repopulate immediately (main.resync() does
+    it) rather than leave it to the next reconcile tick.
+
+    The candidate is syntax-checked before it is loaded, so a template bug
+    leaves the running ruleset alone instead of taking the machine off the air.
+    """
+    if not os.path.exists(DETECT):
+        return False, "detector not installed at %s" % DETECT
+    try:
+        r = subprocess.run([DETECT], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return False, (r.stderr or r.stdout or "detector failed").strip()
+        c = subprocess.run(["nft", "-c", "-f", NFT_CONF],
+                           capture_output=True, text=True, timeout=30)
+        if c.returncode != 0:
+            return False, ("rendered ruleset is invalid, keeping the running "
+                           "one: " + (c.stderr or "").strip())
+        a = subprocess.run(["nft", "-f", NFT_CONF],
+                           capture_output=True, text=True, timeout=30)
+        if a.returncode != 0:
+            return False, (a.stderr or "could not load ruleset").strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, str(e)
+    return True, None
 
 
 def _nft(*args, check=False):

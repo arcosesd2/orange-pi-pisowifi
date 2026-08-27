@@ -169,7 +169,7 @@ EOF
 # render the network configs for THIS board
 # ---------------------------------------------------------------------------
 python3 - "$CFG" "$TPL" "$LAN_IF" "$LAN_DEV" "$WAN_IF" "$CFG_GW" "$CLIENT_NET" "$USE_HOSTAPD" <<'PY'
-import json, os, re, sqlite3, sys
+import json, os, re, sqlite3, subprocess, sys
 
 cfgp, tpl, lan_if, lan_dev, wan, gw, net, hostapd = sys.argv[1:9]
 cfg = json.load(open(cfgp))
@@ -227,16 +227,31 @@ if os.path.exists(src):
     # counter, so a blocked device shows up as a number instead of a mystery.
     anti = antifwd = ""
     if cfg.get("anti_tether"):
-        anti = ("    chain mangle_post {\n"
-                "        type filter hook postrouting priority mangle; policy accept;\n"
-                "        oifname %s ip ttl set 1\n"
-                "        oifname %s ip6 hoplimit set 1\n"
-                "    }" % (lan_dev, lan_dev))
-        if cfg.get("anti_tether_strict"):
-            antifwd = (
-                "        iifname %s ip ttl != { 64, 128, 255 } counter drop\n"
-                "        iifname %s ip6 hoplimit != { 64, 128, 255 } counter drop"
-                % (lan_dev, lan_dev))
+        # Observation only. Classifying every client packet by whether its TTL
+        # is an OS initial value or one lower, and recording the MAC. Nothing
+        # is dropped here; a MAC that lands in BOTH sets is the tethering
+        # signal, and that intersection is computed in the app.
+        antifwd = (
+            "        iifname %s ip ttl { 64, 128, 255 } "
+            "update @ttl_norm { ether saddr }\n"
+            "        iifname %s ip ttl != { 64, 128, 255 } "
+            "update @ttl_fwd { ether saddr }" % (lan_dev, lan_dev))
+        if cfg.get("anti_tether_enforce"):
+            # Enforcement is per device and applies ONLY to MACs the app has
+            # confirmed. TTL 1 still reaches the phone -- it is the last hop --
+            # but dies the moment the phone forwards it to anything behind it.
+            #
+            # It is scoped to @tether_block rather than the whole LAN because
+            # a blanket `ip ttl set 1` also breaks any customer running an
+            # on-device VPN, whose stack decrements once more internally: 1
+            # becomes 0 and the packet is discarded before an app ever sees it.
+            anti = ("    chain mangle_post {\n"
+                    "        type filter hook postrouting priority mangle; "
+                    "policy accept;\n"
+                    "        oifname %s ether daddr @tether_block ip ttl set 1\n"
+                    "        oifname %s ether daddr @tether_block "
+                    "ip6 hoplimit set 1\n"
+                    "    }" % (lan_dev, lan_dev))
     flowt = offl = ""
     if cfg.get("flow_offload"):
         flowt = ("    flowtable ft {\n"
@@ -267,7 +282,34 @@ if os.path.exists(src):
     s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt) \
          .replace("#@OFFLOAD@", offl).replace("#@WAN_MGMT@", wanmgmt) \
          .replace("#@ANTI_TETHER_FWD@", antifwd)
-    write("/etc/nftables.conf", s)
+
+    # Syntax-check the candidate before it replaces a ruleset that works.
+    #
+    # This runs at every boot, so a template or toggle that renders invalid
+    # nft would otherwise install itself, nftables.service would fail, and the
+    # machine would come up with no firewall at all -- no captive portal, no
+    # session enforcement, everyone online for free. Keeping the previous file
+    # and shouting is strictly better than that, and it is the only guard on
+    # the boot path: the admin page's rerender() checks separately.
+    tmp = "/run/pisowifi/nftables.candidate"
+    write(tmp, s)
+    chk = subprocess.run(["nft", "-c", "-f", tmp],
+                         capture_output=True, text=True)
+    if chk.returncode != 0:
+        sys.stderr.write(
+            "pisowifi-detect: REFUSING to install an invalid nftables ruleset; "
+            "keeping the existing one.\n%s\n" % (chk.stderr or "").strip())
+        if not os.path.exists("/etc/nftables.conf"):
+            # Nothing to fall back to. Better to leave it absent and let
+            # nftables.service fail loudly than to write something unloadable.
+            sys.stderr.write("pisowifi-detect: and there is no previous "
+                             "ruleset to fall back to.\n")
+    else:
+        write("/etc/nftables.conf", s)
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
 
 # -- dnsmasq ----------------------------------------------------------------
 src = os.path.join(tpl, "dnsmasq.conf")

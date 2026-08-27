@@ -19,7 +19,7 @@
 set -euo pipefail
 
 LAN_IF=""; WAN_IF=""; GW_IP="10.0.0.1"; USE_HOSTAPD=""; ASSUME_YES=0; LAN_VLAN=""
-WAN_MGMT=""
+WAN_MGMT=""; WITH_TAILSCALE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -31,6 +31,7 @@ while [ $# -gt 0 ]; do
         --wired)   USE_HOSTAPD=0;    shift ;;   # kept for compatibility
         --wan-management)   WAN_MGMT=1; shift ;;   # keep SSH open on the uplink
         --no-wan-management) WAN_MGMT=0; shift ;;
+        --tailscale) WITH_TAILSCALE=1; shift ;;  # remote admin for a sealed card
         --yes|-y)  ASSUME_YES=1;     shift ;;
         *) echo "unknown option: $1"; exit 1 ;;
     esac
@@ -273,6 +274,45 @@ if [ -n "$ADMIN_PW" ]; then
 else
     echo "  (kept the existing /etc/pisowifi/config.json — password unchanged)"
 fi
+
+# ---------------------------------------------------------------------------
+# optional: Tailscale, for administering a sealed card
+# ---------------------------------------------------------------------------
+# Installed here rather than from the admin page on purpose: this adds a
+# third-party package source, which is a decision for whoever builds the
+# machine, not something a web request should be able to do. Enrolment is the
+# web page's job -- this only puts the binary on the card.
+#
+# Nothing is authenticated at this point. seal.sh wipes /var/lib/tailscale so
+# a cloned card carries the package but not an identity, and each machine
+# enrols itself with its own auth key from Admin -> Remote access.
+if [ "$WITH_TAILSCALE" = 1 ]; then
+    if command -v tailscale >/dev/null 2>&1; then
+        echo "==> Tailscale already installed"
+    else
+        echo "==> Installing Tailscale"
+        CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-trixie}")"
+        install -d -m 0755 /usr/share/keyrings
+        KEY_URL="https://pkgs.tailscale.com/stable/debian/${CODENAME}.noarmor.gpg"
+        LIST_URL="https://pkgs.tailscale.com/stable/debian/${CODENAME}.tailscale-keyring.list"
+        KEYRING=/usr/share/keyrings/tailscale-archive-keyring.gpg
+        if curl -fsSL "$KEY_URL" -o "$KEYRING" &&
+           curl -fsSL "$LIST_URL" -o /etc/apt/sources.list.d/tailscale.list; then
+            apt-get update -qq || true
+            if apt-get install -y tailscale; then
+                systemctl enable --now tailscaled || true
+                echo "    installed. Enrol it from Admin -> Remote access."
+            else
+                echo "  !! tailscale package failed to install; continuing without it"
+            fi
+        else
+            # A missing uplink must not take the whole install down -- the
+            # hotspot works fine without remote admin.
+            echo "  !! could not reach pkgs.tailscale.com; continuing without it"
+        fi
+    fi
+fi
+
 echo
 echo "IMPORTANT — admin exposure:"
 echo "  The portal port must be open to customers, and /admin sits on it. Admin"

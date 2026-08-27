@@ -47,9 +47,9 @@
   "watchdog_reboot": false,
 
   "gaming_priority": false,
-  "_comment_anti_tether": "TTL=1 toward customers so a paid session cannot be re-shared over a phone hotspot. anti_tether_strict additionally drops client packets whose TTL shows they were forwarded -- effective against a phone that rewrites TTL, but it fails CLOSED for an unusual stack or an AP that routes instead of bridges.",
-  "anti_tether": false,
-  "anti_tether_strict": false,
+  "_comment_anti_tether": "anti_tether watches for a customer sharing their session over a phone hotspot, by recording which TTLs each MAC sends at; a MAC showing two at once is forwarding for something. It reports only. anti_tether_enforce additionally sends TTL=1 to CONFIRMED sharers, which reaches the phone but dies at anything behind it. Never blanket-drop on a low TTL: an on-device VPN decrements every packet a customer sends, and doing so cut real customers off the internet.",
+  "anti_tether": true,
+  "anti_tether_enforce": false,
   "flow_offload": false,
 
   "trial_enabled": false,

@@ -28,6 +28,7 @@ TESTS = [
     "test_smoke.py",
     "test_templates.py",
     "test_reachability.py",
+    "test_tether.py",
     "test_functional.py",
     "test_security_audit.py",
 ]

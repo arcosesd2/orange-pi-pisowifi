@@ -1,0 +1,140 @@
+{% extends "_admin_base.html" %}
+{% block title %}Remote access{% endblock %}
+
+{% block content %}
+{% if msg %}<div class="card ok"><b>{{ msg }}</b></div>{% endif %}
+{% if error %}<div class="card bad"><b>{{ error }}</b></div>{% endif %}
+
+<section class="card">
+  <h2>Tailscale</h2>
+  <p class="muted">
+    Administer this machine from anywhere, over an encrypted link tied to your
+    own Tailscale account. It works through CGNAT with no port forwarding, and
+    it is the only safe way in once the card is sealed &mdash; sealing closes
+    SSH on both interfaces by design.
+  </p>
+
+  {% if not ts.installed %}
+    <div class="card bad">
+      <b>Not installed on this machine.</b>
+      <p class="muted">
+        Re-run the installer with <code>--tailscale</code>, or install it by
+        hand and reload this page. Nothing here can install it for you: adding
+        a third-party package source is a decision for whoever builds the
+        machine, not for a web request.
+      </p>
+    </div>
+  {% else %}
+    <table class="kv">
+      <tr><th>State</th><td>
+        {% if ts.running %}<span class="pill ok">Connected</span>
+        {% else %}<span class="pill">{{ ts.state }}</span>{% endif %}
+      </td></tr>
+      {% if ts.ip4 %}<tr><th>Address</th><td><code>{{ ts.ip4 }}</code></td></tr>{% endif %}
+      {% if ts.hostname %}<tr><th>Machine name</th><td>{{ ts.hostname }}</td></tr>{% endif %}
+      {% if ts.tailnet %}<tr><th>Tailnet</th><td>{{ ts.tailnet }}</td></tr>{% endif %}
+      <tr><th>Peers</th><td>{{ ts.peers }}</td></tr>
+      {% if ts.error %}<tr><th>Last error</th><td class="muted">{{ ts.error }}</td></tr>{% endif %}
+    </table>
+
+    {% if ts.running and ts.ip4 %}
+      <p>Admin is reachable at <code>http://{{ ts.ip4 }}:8080/admin</code></p>
+      {% if wan_admin %}
+        <div class="card warn">
+          <b>You can close the uplink door now.</b>
+          <p class="muted">
+            <code>wan_admin</code> is still on, so the admin login is also
+            exposed to whatever network your uplink is plugged into. With
+            Tailscale up you no longer need it &mdash; turn it off in
+            <code>/etc/pisowifi/config.json</code> and admin becomes reachable
+            from no physical network at all.
+          </p>
+        </div>
+      {% endif %}
+      <form method="post" action="/admin/tailscale/down" class="inline">
+        <button class="btn">Disconnect</button>
+      </form>
+      <form method="post" action="/admin/tailscale/logout" class="inline"
+            onsubmit="return confirm('Forget this machine’s Tailscale identity? Re-enrolling needs a new auth key.')">
+        <button class="btn danger">Log out</button>
+      </form>
+    {% else %}
+      <form method="post" action="/admin/tailscale/up">
+        <label for="authkey">Auth key</label>
+        <input type="password" id="authkey" name="authkey"
+               placeholder="tskey-auth-..." autocomplete="off" required>
+        <p class="muted">
+          Generate one in the Tailscale admin console under <b>Settings &rarr;
+          Keys</b>. The key is used once to enrol this machine and is never
+          stored &mdash; a reusable key kept on disk would end up in every
+          backup and on every card cloned from this one.
+        </p>
+        <button class="btn primary">Connect</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Connection sharing</h2>
+  <p class="muted">
+    A customer who turns on their phone's hotspot can serve several people from
+    one payment. This detects it by watching the TTL of arriving packets: a
+    device that forwards for others shows <b>two</b> different TTLs at once
+    &mdash; its own traffic and the traffic it is relaying.
+  </p>
+
+  <table class="kv">
+    <tr><th>Devices watched</th><td>{{ tether.watched }}</td></tr>
+    <tr><th>Sharing now</th><td>
+      {% if tether.tethering %}
+        {% for mac in tether.tethering %}<code>{{ mac }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      {% else %}<span class="muted">none detected</span>{% endif %}
+    </td></tr>
+    <tr><th>Currently limited</th><td>
+      {% if tether.blocked %}
+        {% for mac in tether.blocked %}
+          <code>{{ mac }}</code>
+          <form method="post" action="/admin/tether/release" class="inline">
+            <input type="hidden" name="mac" value="{{ mac }}">
+            <button class="btn small">Release</button>
+          </form>
+        {% endfor %}
+      {% else %}<span class="muted">none</span>{% endif %}
+    </td></tr>
+  </table>
+
+  {% if tether.vpn_like %}
+    <div class="card">
+      <b>Using a VPN, not sharing &mdash; deliberately left alone</b>
+      <p class="muted">
+        {% for mac in tether.vpn_like %}<code>{{ mac }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+        &mdash; every packet from these arrives one TTL lower, but only ever at
+        one value. That is an on-device VPN or ad blocker re-injecting traffic
+        through a local tunnel, not a hotspot. An earlier version of this
+        feature blocked exactly this pattern and cut those customers off the
+        internet entirely.
+      </p>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/admin/tether/settings">
+    <label class="check">
+      <input type="checkbox" name="anti_tether" {% if anti_tether %}checked{% endif %}>
+      Detect connection sharing
+    </label>
+    <p class="muted">Watches and reports only. Nothing is blocked.</p>
+
+    <label class="check">
+      <input type="checkbox" name="anti_tether_enforce" {% if enforce %}checked{% endif %}>
+      Limit devices caught sharing
+    </label>
+    <p class="muted">
+      Sends traffic to a confirmed sharing device with a TTL that reaches the
+      phone but dies at anything behind it. Applies only to devices listed
+      above as sharing, never to a whitelisted device.
+    </p>
+    <button class="btn primary">Save</button>
+  </form>
+</section>
+{% endblock %}

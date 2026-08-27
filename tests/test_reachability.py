@@ -109,10 +109,20 @@ def matches(rule, p):
     """True if this rule's match clauses all apply to the packet."""
     if "iifname $LAN_IF" in rule and p["iif"] != LAN:
         return False
-    if 'iifname "lo"' in rule and p["iif"] != "lo":
-        return False
     if "iifname $WAN_IF" in rule and p["iif"] != WAN:
         return False
+    # Any literal interface name, not just the handful this model knew about.
+    # Previously an unrecognised one (`iifname "tailscale0"`) matched none of
+    # these clauses and fell through to "matches everything", so the rule read
+    # as a blanket accept and the model cheerfully reported that unpaid clients
+    # could reach SSH. A firewall model that silently widens on an unfamiliar
+    # rule is worse than no model.
+    for m in re.finditer(r'iifname "([^"$]+)"', rule):
+        if p["iif"] != m.group(1):
+            return False
+    for m in re.finditer(r'oifname "([^"$]+)"', rule):
+        if p.get("oif") != m.group(1):
+            return False
     if "oifname $LAN_IF" in rule and p.get("oif") != LAN:
         return False
     if "oifname $WAN_IF" in rule and p.get("oif") != WAN:
@@ -286,6 +296,29 @@ def main():
                dport=22, mac_in=set(), ctstate="new")
     act, _ = verdict(chain(text, "input"), p)
     check("wan         tcp/22 inbound (wan_management off)", str(act), "drop")
+
+    print("\n=== Tailscale is an owner path, and only for the owner ===")
+    # Once a card is sealed, SSH is closed on both interfaces and customers
+    # cannot reach /admin. Tailscale is then the only way in, so it must work
+    # for the admin port -- and must not become a way for anyone else in.
+    p = Packet(iif="tailscale0", saddr="100.64.0.9", daddr="100.64.0.1",
+               proto="tcp", dport=PORTAL, mac_in=set(), ctstate="new")
+    act, _ = verdict(chain(text, "input"), p)
+    check("tailscale   admin port inbound", str(act), "accept")
+
+    p = Packet(iif="tailscale0", saddr="100.64.0.9", daddr="100.64.0.1",
+               proto="tcp", dport=SSH_PORT, mac_in=set(), ctstate="new")
+    act, _ = verdict(chain(text, "input"), p)
+    check("tailscale   tcp/22 inbound", str(act), "accept")
+
+    # The rule names one interface. A customer packet must never satisfy it --
+    # this is the exact modelling hole that made an unrecognised iifname read
+    # as a blanket accept and report SSH open to unpaid clients.
+    p = Packet(iif=LAN, saddr="10.0.0.50", daddr=GW, proto="tcp",
+               dport=SSH_PORT, mac_in=set(), ctstate="new")
+    act, _ = verdict(chain(text, "input"), p)
+    check("unpaid      tcp/22 is NOT let in by the tailscale rule",
+          str(act), "reject")
 
     print("\n=== Established traffic must never be broken mid-session ===")
     p = Packet(iif=LAN, saddr="10.0.0.50", daddr=GW, proto="tcp",

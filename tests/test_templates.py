@@ -85,6 +85,16 @@ PAGES = {
                    "speed": None, "enabled": True}]),
     "diag.html": dict(mock=False, error=None, hw=HW, denominations=HW["denominations"],
                       eint_pins=[3, 5, 7, 8, 10, 11, 13, 15, 22, 26]),
+    "remote_access.html": dict(
+        ts={"installed": True, "running": True, "state": "Running",
+            "ip4": "100.101.102.103", "hostname": "pisowifi-42af48",
+            "tailnet": "example.ts.net", "peers": 3, "error": None},
+        tether={"enabled": True, "enforcing": True, "watched": 4,
+                "tethering": ["aa:bb:cc:dd:ee:03"],
+                "blocked": ["aa:bb:cc:dd:ee:03"],
+                "vpn_like": ["aa:bb:cc:dd:ee:02"]},
+        anti_tether=True, enforce=True, wan_admin=True,
+        admin_lan_access="off", msg="Saved.", error=None),
     "admin_login.html": dict(error=None),
     "admin_setup.html": dict(error=None, mac="aa:bb:cc:dd:ee:01", on_lan=True),
 }
@@ -101,9 +111,19 @@ def main():
     node = shutil.which("node")
     fails = []
     print("  %-20s %8s %8s  %s" % ("template", "bytes", "scripts", "javascript"))
-    for tpl in sorted(PAGES):
+    variants = dict(PAGES)
+    variants["remote_access.html (not installed)"] = dict(
+        PAGES["remote_access.html"],
+        ts={"installed": False, "running": False, "state": "NotInstalled",
+            "ip4": None, "hostname": None, "tailnet": None, "peers": 0,
+            "error": "Tailscale is not installed on this machine."},
+        tether={"enabled": True, "enforcing": False, "watched": 0,
+                "tethering": [], "blocked": [], "vpn_like": []},
+        enforce=False, wan_admin=False, msg=None, error=None)
+    for tpl in sorted(variants):
+        name = tpl.split(" (")[0]
         try:
-            out = env.get_template(tpl).render(**COMMON, **PAGES[tpl])
+            out = env.get_template(name).render(**COMMON, **variants[tpl])
         except Exception as e:                                    # noqa: BLE001
             print("  %-20s  RENDER FAIL: %s: %s" % (tpl, type(e).__name__, e))
             fails.append("%s: %s" % (tpl, e))
@@ -139,7 +159,7 @@ def main():
         for f in fails:
             print("  *", f)
         return 1
-    print("all %d templates render, and their JavaScript is clean" % len(PAGES))
+    print("all %d templates render, and their JavaScript is clean" % len(variants))
     return 0
 
 

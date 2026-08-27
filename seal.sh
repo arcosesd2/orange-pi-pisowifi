@@ -44,6 +44,7 @@ This will WIPE this machine and power it off:
   * the device whitelist (or card N would 403 its own owner)
   * admin password (the new card forces a fresh one at first login)
   * SSH host keys, machine-id, hostname, logs, DHCP leases
+  * the Tailscale node identity (the package stays; each card enrols itself)
   * the rendered nftables/dnsmasq/hostapd configs (regenerated at every boot)
 
 KEPT — this is what a golden image is for:
@@ -155,6 +156,25 @@ rm -f /run/pisowifi/env /run/pisowifi/hostapd.needed 2>/dev/null || true
 # old board's interface names on top of the freshly detected ones.
 systemctl disable pisowifi-net.service 2>/dev/null || true
 rm -f /etc/systemd/system/pisowifi-net.service
+
+# ---------------------------------------------------------------------------
+# Tailscale node identity
+# ---------------------------------------------------------------------------
+# /var/lib/tailscale holds the key material that IS this node on the tailnet.
+# Cloned onto a hundred cards it becomes a hundred machines claiming one
+# identity: they knock each other offline as each re-registers, and the owner
+# cannot tell which board they are actually connected to. Each card must enrol
+# itself with its own auth key from Admin -> Remote access.
+#
+# The package itself is deliberately left installed -- it is the only way into
+# a sealed board, and re-installing it per machine defeats the point of an
+# image.
+if [ -d /var/lib/tailscale ]; then
+    echo "==> Clearing Tailscale node identity (keeping the package)"
+    systemctl stop tailscaled 2>/dev/null || true
+    rm -rf /var/lib/tailscale/* 2>/dev/null || true
+    rm -f /var/lib/tailscale/tailscaled.state 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # logs and shell history

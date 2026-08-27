@@ -30,6 +30,8 @@ from flask import (
 import firewall
 import pppoe
 import shaper
+import tailscale
+import tether
 from coinslot import CoinSlot
 from db import Db, DEFAULT_ADMIN_PASSWORD
 from diagnostics import PinManager, EINT_PINS, HEADER
@@ -114,11 +116,11 @@ DEFAULTS = {
     # --- v2.4 ---
     # QoS / firewall toggles (some are consumed by install.sh from config.json)
     "gaming_priority": False,      # CAKE diffserv4 (prioritize game/VoIP)
-    "anti_tether": False,          # TTL=1 so paid WiFi can't be re-shared
-    # Also drop client packets whose TTL shows a hotspot forwarded them.
-    # Only helps against a phone that rewrites TTL, and fails CLOSED for
-    # an unusual stack or a routing AP, so it is opt-in on top.
-    "anti_tether_strict": False,
+    "anti_tether": True,           # watch for shared connections (reports only)
+    # Limit devices detection has CONFIRMED are sharing. Opt-in on top of
+    # detection, and scoped per device -- never a blanket rule. See
+    # app/tether.py for why the blanket version broke customers.
+    "anti_tether_enforce": False,
     "flow_offload": False,         # kernel fast-path (scope vs QoS — see README)
     # free trial
     "trial_enabled": False,
@@ -1314,6 +1316,91 @@ def admin_devices_remove():
     return redirect("/admin/devices")
 
 
+# ---------- admin: remote access (Tailscale) + tethering ----------
+
+def _remote_page(msg=None, error=None):
+    return render_template(
+        "remote_access.html", name=setting("hotspot_name"),
+        ts=tailscale.status(),
+        tether=tether.summary(setting("anti_tether_enforce")),
+        anti_tether=bool(setting("anti_tether")),
+        enforce=bool(setting("anti_tether_enforce")),
+        wan_admin=bool(setting("wan_admin")),
+        admin_lan_access=setting("admin_lan_access") or "whitelist",
+        msg=msg, error=error)
+
+
+@app.route("/admin/remote-access")
+def admin_remote_access():
+    if not admin_ok():
+        return redirect("/admin/login")
+    return _remote_page()
+
+
+@app.route("/admin/tailscale/up", methods=["POST"])
+def admin_tailscale_up():
+    if not admin_ok():
+        return redirect("/admin/login")
+    # The key is used once and never written anywhere. It is not put in the
+    # settings table on purpose: a reusable auth key in every backup is a
+    # fleet-wide secret, the same mistake as a cloned root password.
+    ok, msg = tailscale.up(request.form.get("authkey"),
+                           hostname=setting("device_id") or None)
+    db.log_audit("tailscale_up" if ok else "tailscale_up_failed")
+    return _remote_page(msg=msg if ok else None, error=None if ok else msg)
+
+
+@app.route("/admin/tailscale/down", methods=["POST"])
+def admin_tailscale_down():
+    if not admin_ok():
+        return redirect("/admin/login")
+    ok, msg = tailscale.down()
+    db.log_audit("tailscale_down")
+    return _remote_page(msg=msg if ok else None, error=None if ok else msg)
+
+
+@app.route("/admin/tailscale/logout", methods=["POST"])
+def admin_tailscale_logout():
+    if not admin_ok():
+        return redirect("/admin/login")
+    ok, msg = tailscale.logout()
+    db.log_audit("tailscale_logout")
+    return _remote_page(msg=msg if ok else None, error=None if ok else msg)
+
+
+@app.route("/admin/tether/settings", methods=["POST"])
+def admin_tether_settings():
+    if not admin_ok():
+        return redirect("/admin/login")
+    f = request.form
+    db.set_setting("anti_tether", f.get("anti_tether") == "on")
+    db.set_setting("anti_tether_enforce", f.get("anti_tether_enforce") == "on")
+    db.log_audit("tether_settings",
+                 "detect=%s enforce=%s" % (setting("anti_tether"),
+                                           setting("anti_tether_enforce")))
+    # The detection and enforcement rules live in the ruleset, so the change
+    # only takes effect once the detector re-renders it. Loading a ruleset
+    # flushes every runtime set, so resync() must run straight after or every
+    # paying customer stays disconnected until the next reconcile tick.
+    ok, err = firewall.rerender()
+    if ok:
+        resync()
+    return _remote_page(
+        msg="Saved. Firewall rules updated and sessions restored." if ok else None,
+        error=err)
+
+
+@app.route("/admin/tether/release", methods=["POST"])
+def admin_tether_release():
+    if not admin_ok():
+        return redirect("/admin/login")
+    mac = (request.form.get("mac") or "").strip().lower()
+    if tether.release(mac):
+        db.log_audit("tether_released", mac)
+        return _remote_page(msg="%s is no longer limited." % mac)
+    return _remote_page(error="Could not release %s." % (mac or "that device"))
+
+
 # ---------- admin: audit log ----------
 
 @app.route("/admin/audit")
@@ -1749,6 +1836,7 @@ def _reconcile_once():
         if minor_hex not in wanted:
             shaper.unlimit_minor(minor_hex)
     _refresh_walled()
+    _enforce_tethering()
     if setting("pppoe_enabled"):
         pppoe.enforce(db)   # expire overdue plans + keep chap-secrets in sync
     # keep the audit log bounded so it can't grow for the life of the SD card
@@ -1756,6 +1844,34 @@ def _reconcile_once():
     if now - _last_prune > 3600:
         _last_prune = now
         db.prune_audit()
+
+
+def _enforce_tethering():
+    """Push confirmed tethering devices into the enforcement set.
+
+    Detection runs whenever anti_tether is on, because observing costs nothing
+    and the owner should be able to see what is happening before deciding to
+    act on it. Enforcement is a separate switch, and only ever touches MACs
+    that showed BOTH an own-traffic TTL and a forwarded one -- never a device
+    that merely runs a VPN. See app/tether.py for why that distinction is the
+    whole feature.
+    """
+    if not setting("anti_tether") or not setting("anti_tether_enforce"):
+        return
+    try:
+        exempt = {d["mac"].lower() for d in db.list_devices("white")}
+        macs = tether.tethering_macs() - exempt
+    except Exception as e:                                   # pragma: no cover
+        app.logger.warning("tether: detection failed: %s", e)
+        return
+    new = macs - tether.blocked_macs()
+    if new:
+        pushed = tether.enforce(new)
+        for mac in sorted(pushed):
+            app.logger.warning(
+                "tether: %s is sharing its connection -- limiting it to the "
+                "paying device", mac)
+            db.log_audit("tether_enforced", mac)
 
 
 def reconcile():

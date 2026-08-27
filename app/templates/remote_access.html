@@ -76,6 +76,70 @@
 </section>
 
 <section class="card">
+  <h2>Who may open admin</h2>
+  <p class="muted">
+    This gates <code>/admin</code> only. The customer portal stays reachable on
+    the hotspot in every mode &mdash; lock that away and nobody can insert a
+    coin.
+  </p>
+
+  <form method="post" action="/admin/access-mode">
+    <label class="radio">
+      <input type="radio" name="admin_lan_access" value="whitelist"
+             {% if admin_lan_access == 'whitelist' %}checked{% endif %}>
+      <b>Whitelisted devices</b>
+      <span class="muted">&mdash; the default. Customers are refused; a device
+      you have whitelisted may open admin over the hotspot. Stays open to the
+      customer network while no device is whitelisted yet, so a fresh machine
+      cannot lock out its own owner.</span>
+    </label>
+
+    <label class="radio">
+      <input type="radio" name="admin_lan_access" value="off"
+             {% if admin_lan_access == 'off' %}checked{% endif %}>
+      <b>Uplink port only</b>
+      <span class="muted">&mdash; the customer network can never open admin.
+      Reachable from the wired uplink, which also means anyone else on that
+      network.</span>
+    </label>
+
+    <label class="radio">
+      <input type="radio" name="admin_lan_access" value="tailscale"
+             {% if admin_lan_access == 'tailscale' %}checked{% endif %}
+             {% if not ts.running %}disabled{% endif %}>
+      <b>Tailscale only</b>
+      <span class="muted">&mdash; no physical network can open admin, the
+      uplink included. Only the tunnel, and the machine itself.
+      {% if not ts.running %}
+        <b>Connect Tailscale above to enable this.</b>
+      {% endif %}</span>
+    </label>
+
+    <label class="radio">
+      <input type="radio" name="admin_lan_access" value="any"
+             {% if admin_lan_access == 'any' %}checked{% endif %}>
+      <b>Anywhere</b>
+      <span class="muted">&mdash; no restriction. The recovery setting; not for
+      a deployed machine.</span>
+    </label>
+
+    <button class="btn primary">Save</button>
+  </form>
+
+  {% if admin_lan_access == 'tailscale' %}
+    <div class="card ok">
+      <b>Admin is Tailscale-only.</b>
+      <p class="muted">
+        If you ever lose access to the tailnet, set
+        <code>"admin_lan_access": "any"</code> in
+        <code>/etc/pisowifi/config.json</code> and restart the service. That
+        needs a keyboard or a card reader, so keep a way in.
+      </p>
+    </div>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Connection sharing</h2>
   <p class="muted">
     A customer who turns on their phone's hotspot can serve several people from

@@ -4,6 +4,8 @@
   "_comment_interfaces": "lan_if/wan_if are rewritten at every boot by pisowifi-detect while auto_detect_interfaces is true; set it false to pin them.",
   "auto_detect_interfaces": true,
   "_comment_wan_management": "true keeps SSH/portal/ping reachable on the UPLINK side. Bench bring-up only; seal.sh forces it false.",
+  "_comment_admin_lan_access": "Who may open /admin. whitelist (default) = customers refused once any device is whitelisted; off = customer network never, uplink port yes; tailscale = ONLY over the Tailscale tunnel, no physical network at all; any = no restriction, the recovery setting. The customer portal is never gated by this. seal.sh resets it, because a Tailscale-only card cannot be set up before Tailscale is enrolled.",
+  "admin_lan_access": "whitelist",
   "wan_management": false,
   "_comment_wan_admin": "true serves the ADMIN PAGE ONLY (no SSH) on the uplink port, and survives seal.sh. Required when admin_lan_access is off, otherwise sealing leaves admin unreachable.",
   "wan_admin": false,

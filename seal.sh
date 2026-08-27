@@ -45,6 +45,7 @@ This will WIPE this machine and power it off:
   * admin password (the new card forces a fresh one at first login)
   * SSH host keys, machine-id, hostname, logs, DHCP leases
   * the Tailscale node identity (the package stays; each card enrols itself)
+  * admin access mode (a Tailscale-only card could never be set up)
   * the rendered nftables/dnsmasq/hostapd configs (regenerated at every boot)
 
 KEPT — this is what a golden image is for:
@@ -88,6 +89,14 @@ if not os.path.exists(db):
 # database here would hand every cloned card the config.json defaults instead,
 # including the default coin pin, which is exactly the wrong outcome.
 IDENTITY = ("admin_pw_hash", "admin_pw_default", "SECRET_KEY", "device_id")
+# Policy that CANNOT survive cloning, however deliberately it was set here.
+#
+# admin_lan_access="tailscale" locks admin to the tunnel -- but a fresh card
+# has no Tailscale identity (cleared below), and the only way to enrol one is
+# the admin page. The card would boot unreachable and unbootstrappable, with
+# no SSH either. Dropping it back to the default lets the new owner set up,
+# enrol Tailscale, and lock it down again on that machine.
+RESET = ("admin_lan_access",)
 CUSTOMER = ("sales", "sessions", "vouchers", "devices", "audit",
             "trials", "wallets", "pppoe_accounts")
 
@@ -98,7 +107,7 @@ for t in CUSTOMER:
         con.execute("DELETE FROM %s" % t)
     except sqlite3.OperationalError:
         pass                        # table absent in this schema version
-for k in IDENTITY:
+for k in IDENTITY + RESET:
     con.execute("DELETE FROM settings WHERE key=?", (k,))
 kept = con.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
 con.execute("PRAGMA wal_checkpoint(TRUNCATE)")

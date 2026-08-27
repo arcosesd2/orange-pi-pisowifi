@@ -271,10 +271,41 @@ _RECOVER = ("To recover a lockout, set \"admin_lan_access\": \"any\" in "
             "/etc/pisowifi/config.json and restart the pisowifi service.")
 
 
+TAILNET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _from_tailscale():
+    """True if this request arrived over the Tailscale tunnel.
+
+    Tailscale hands out addresses from 100.64.0.0/10, so a source inside that
+    range plus a running daemon is the test. The daemon check is what stops the
+    range alone being enough: 100.64/10 is also the CGNAT space an ISP may use,
+    and without it a machine whose Tailscale was never set up could be reached
+    by anything that happened to arrive with such a source address.
+    """
+    try:
+        src = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    if src not in TAILNET:
+        return False
+    try:
+        return bool(tailscale.status().get("running"))
+    except Exception:                                        # pragma: no cover
+        return False
+
+
+def _is_loopback():
+    try:
+        return ipaddress.ip_address(request.remote_addr or "").is_loopback
+    except ValueError:
+        return False
+
+
 def _admin_lan_denied():
     """Why (if at all) this request must not reach /admin. None = allowed.
 
-    Three modes:
+    Four modes:
       any        - no restriction (recovery setting).
       whitelist  - customer network may reach admin only from a whitelisted
                    MAC. Opens up while the whitelist is empty, so a fresh
@@ -282,15 +313,35 @@ def _admin_lan_denied():
       off        - the customer network may NEVER reach admin, whitelist or
                    not. Admin is then reachable only on another interface:
                    the wired uplink port, the box itself, or Tailscale.
+      tailscale  - admin is reachable ONLY over the Tailscale tunnel (and from
+                   the box itself). Every physical network is refused, the
+                   uplink port included.
 
     Note what "off" can and cannot do. Wi-Fi clients and anything cabled into
     the same switch/AP arrive on the *same* interface in the *same* subnet, so
     the box cannot tell a cable from a radio down there -- "off" separates the
-    customer network from the uplink port, not cable from Wi-Fi.
+    customer network from the uplink port, not cable from Wi-Fi. Only
+    "tailscale" closes the uplink too.
+
+    The customer portal is deliberately untouched by all of this. It is gated
+    per path in _admin_guard(), which only inspects /admin -- lock the portal
+    itself away and no customer can insert a coin, which stops the machine
+    earning entirely.
+
+    Loopback stays allowed in every mode. Anyone with a shell on the box has
+    already won, and it is what makes a lockout recoverable at all.
     """
     mode = setting("admin_lan_access") or "whitelist"
     if mode == "any":
         return None
+    if _is_loopback():
+        return None
+    if mode == "tailscale":
+        if _from_tailscale():
+            return None
+        return ("Admin on this machine is reachable only over Tailscale.\n\n"
+                "Connect to the tailnet and open it at the machine's 100.x "
+                "address.\n\n" + _RECOVER)
     if not _from_customer_lan():
         return None                      # box itself / Tailscale / other iface
     if mode == "off":
@@ -1366,6 +1417,43 @@ def admin_tailscale_logout():
     ok, msg = tailscale.logout()
     db.log_audit("tailscale_logout")
     return _remote_page(msg=msg if ok else None, error=None if ok else msg)
+
+
+_ACCESS_MODES = ("whitelist", "off", "tailscale", "any")
+
+
+@app.route("/admin/access-mode", methods=["POST"])
+def admin_access_mode():
+    if not admin_ok():
+        return redirect("/admin/login")
+    mode = (request.form.get("admin_lan_access") or "").strip()
+    if mode not in _ACCESS_MODES:
+        return _remote_page(error="Unknown access mode.")
+
+    # Refuse to lock admin behind a tunnel that is not up. Setting this without
+    # a working tailnet leaves admin reachable from nowhere but the box itself,
+    # and the only way back is editing config.json over a console -- on a
+    # machine whose whole point is that it has no SSH.
+    if mode == "tailscale":
+        ts = tailscale.status()
+        if not ts["running"]:
+            return _remote_page(error=(
+                "Tailscale is not connected, so this would lock you out of "
+                "admin completely. Connect it above first, check you can reach "
+                "this page at the machine's 100.x address, then set this."))
+        if not ts["ip4"]:
+            return _remote_page(error=(
+                "Tailscale is running but has no address yet. Wait for it to "
+                "finish connecting, then try again."))
+
+    db.set_setting("admin_lan_access", mode)
+    db.log_audit("admin_access_mode", mode)
+    if mode == "tailscale":
+        return _remote_page(msg=(
+            "Admin is now reachable only over Tailscale, at "
+            "http://%s:8080/admin -- and from the machine itself. The customer "
+            "portal is unaffected." % tailscale.status()["ip4"]))
+    return _remote_page(msg="Admin access mode set to '%s'." % mode)
 
 
 @app.route("/admin/tether/settings", methods=["POST"])

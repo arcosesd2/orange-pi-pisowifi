@@ -94,7 +94,7 @@ PAGES = {
                 "blocked": ["aa:bb:cc:dd:ee:03"],
                 "vpn_like": ["aa:bb:cc:dd:ee:02"]},
         anti_tether=True, enforce=True, wan_admin=True,
-        admin_lan_access="off", msg="Saved.", error=None),
+        admin_lan_access="tailscale", msg="Saved.", error=None),
     "admin_login.html": dict(error=None),
     "admin_setup.html": dict(error=None, mac="aa:bb:cc:dd:ee:01", on_lan=True),
 }

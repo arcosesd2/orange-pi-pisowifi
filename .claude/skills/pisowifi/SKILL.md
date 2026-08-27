@@ -168,7 +168,47 @@ installed it. `wan_management` (config toggle, `install.sh --wan-management`,
 rendered via the `#@WAN_MGMT@` token) keeps SSH/portal/ICMP open for bench
 work; `seal.sh` forces it off so no master image ships that way.
 
-### 3d. Never write a `#@TOKEN@` in prose in the template
+### 3d. Never block a client on a low TTL alone
+
+**Fails, by cutting paying customers off the internet entirely:**
+
+    iifname $LAN_IF ip ttl != { 64, 128, 255 } drop
+
+The reasoning is that a hotspot decrements TTL when it forwards, so a low TTL
+means a shared device. The arithmetic is right and the conclusion is wrong: **a
+phone decrements its own traffic too whenever an on-device VPN is running** —
+ad blockers, Private DNS, WARP and corporate VPN clients re-inject through a
+local tun and the phone's own stack forwards on the way through. Every packet
+that customer sends is one lower, forever.
+
+The evidence that misleads you: the test phone answered **pings at TTL 64**
+while its **TCP left at 63**. That looks like a phone plus something behind it.
+Echo replies are kernel-generated and never cross the tun, so a local VPN
+produces exactly that split.
+
+**Tethering is two TTL populations from one MAC at once**, not a low one:
+
+    64 only          the device, however it routes internally
+    63 only          on-device VPN — NOT tethering, leave it alone
+    64 and 63        it is forwarding for something else
+
+Record into two sets and intersect in userspace; enforce per confirmed MAC,
+never with a blanket rule.
+
+### 3e. A set that rules add to needs `flags dynamic`
+
+    FAILS   set ttl_norm { type ether_addr; flags timeout; timeout 10m; }
+    WORKS   set ttl_norm { type ether_addr; flags dynamic, timeout; timeout 10m; }
+
+Without it nft rejects the **whole ruleset**, so the machine comes up with no
+firewall — no portal, no enforcement, everyone online free — rather than just
+losing the feature. Sets populated only from userspace (`nft add element`) do
+not need it.
+
+`detect.sh` now runs `nft -c` on the candidate before installing it and keeps
+the working ruleset if it fails, because that path runs at **every boot**.
+
+### 3f. Never write a `#@TOKEN@` in prose in the template
 
 `detect.sh` fills placeholders with `str.replace()`, which replaces **every**
 occurrence. The header comment documented `#@ANTI_TETHER@` by naming it, so the
@@ -186,7 +226,7 @@ parsing -- i.e. the bug only existed once the feature was switched on.
 alone on its line. That check was negative-tested; a guard nobody has watched
 fail is not a guard.
 
-### 3e. Reloading nftables flushes the runtime sets
+### 3g. Reloading nftables flushes the runtime sets
 
 `systemctl restart nftables` reloads `/etc/nftables.conf`, which recreates
 `allowed` / `whitelist` / `blocked` **empty** -- every paying customer is
@@ -341,6 +381,38 @@ The threat model is a customer standing in the shop with a phone.
   the box is a low-bandwidth tunnel that captive-portal detection requires.
 
 `tests/test_security_audit.py` asserts all of this from the customer's side.
+
+### 7a. A model that widens on an unfamiliar rule is worse than no model
+
+`tests/test_reachability.py` knew `iifname $LAN_IF`, `$WAN_IF` and `"lo"`. A
+rule naming anything else matched none of its clauses and fell through to
+"matches everything", so `iifname "tailscale0" accept` read as a blanket accept
+and the suite cheerfully reported that unpaid customers could reach SSH.
+
+It failed loudly, which is the only reason it was caught. Match literal
+interface names generically, and be suspicious of any model whose default for
+an unrecognised construct is permissive.
+
+### 7b. Policy that cannot survive cloning must be reset by `seal.sh`
+
+`admin_lan_access: "tailscale"` locks admin to the tunnel. A cloned card has no
+Tailscale identity — sealing wipes `/var/lib/tailscale`, and it must, or every
+card claims one node and they knock each other offline — and the only way to
+enrol one is the admin page. So the card boots unreachable, unbootstrappable,
+and with no SSH.
+
+The test for anything in the settings table: *if a fresh card inherited this,
+could its new owner still get in?* If not, it belongs in `seal.sh`'s reset list
+alongside the identity keys.
+
+### 7c. Never gate the customer portal
+
+Whatever admin is locked behind, `/`, `/api/status` and `/buy` must stay
+reachable from the hotspot. Gate those and customers cannot insert coins: the
+machine keeps running, looks healthy, and silently stops earning.
+`tests/test_admin_gate.py` asserts this in the most restrictive mode.
+
+---
 
 ## 8. Rates, and what survives a restart
 

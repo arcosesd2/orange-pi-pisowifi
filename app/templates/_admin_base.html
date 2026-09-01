@@ -39,11 +39,13 @@
       <div class="spacer"></div>
       <a class="logout" href="/admin/logout">Log out</a>
     </div>
+    <div class="tabs-wrap">
     <nav class="tabs">
       {%- for href, label in TABS %}
       <a href="{{ href }}"{% if request.path == href %} class="here"{% endif %}>{{ label }}</a>
       {%- endfor %}
     </nav>
+    </div>
   </header>
 
   <main>

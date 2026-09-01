@@ -120,6 +120,15 @@ body {
   scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar { display: none; }
+/* The strip scrolls (826px of tabs in a 375px viewport), but nothing said so.
+   A fade on the right edge is the conventional hint that there is more. */
+.tabs-wrap { position: relative; }
+.tabs-wrap::after {
+  content: "";
+  position: absolute; right: 0; top: 0; bottom: 10px; width: 34px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(6,32,51,0), rgba(6,32,51,.92));
+}
 
 .tabs a {
   flex: 0 0 auto;
@@ -223,20 +232,70 @@ label {
   color: var(--muted);
   font-weight: 600;
 }
-label:first-child { margin-top: 0; }
+/* Only a label at the very top of a CARD should lose its margin. Applying it
+   to any first-child label also caught labels that begin a <form> sitting
+   mid-card, jamming them against the paragraph above with no gap at all. */
+.card > label:first-child,
+.card > form:first-child > label:first-child { margin-top: 0; }
 
 label.check {
   display: flex;
   align-items: flex-start;
   gap: 9px;
+  /* The tappable thing is this row, not the 13px native checkbox inside it.
+     At 22px it was half a touch target, and these rows toggle real settings
+     -- tethering enforcement, which admin can reach the machine. */
+  min-height: 44px;
+  padding: 7px 0;
+  cursor: pointer;
   color: var(--txt);
   font-weight: 500;
   font-size: .9rem;
 }
-label.check input { width: auto; margin-top: 3px; flex: 0 0 auto; }
+label.check input { width: auto; min-height: 0; margin-top: 3px; flex: 0 0 auto; }
+
+/* Radio rows, e.g. the access-mode picker. This class was used in the markup
+   and never styled at all, so a control deciding who can reach admin was a
+   13px native glyph with no row around it. */
+label.radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 44px;
+  padding: 8px 0;
+  color: var(--txt);
+  font-weight: 500;
+  font-size: .9rem;
+  cursor: pointer;
+}
+label.radio input { width: auto; min-height: 0; margin-top: 4px; flex: 0 0 auto; }
+label.radio + label.radio { border-top: 1px solid var(--line-soft); }
+/* The title and its description are one flex child, not two. As siblings the
+   <b> competed with the description for width and "Uplink port only" wrapped
+   into a three-line column beside its own text. */
+label.radio .rt { flex: 1; min-width: 0; }
+label.radio .rt b { display: block; }
+label.radio .muted { display: block; margin-top: 2px; }
+
+/* Day pickers on the schedule page: seven tiny checkboxes in a row. */
+.days label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 4px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--txt);
+  cursor: pointer;
+}
+.days input { width: auto; min-height: 0; }
 
 input, select, textarea {
   width: 100%;
+  /* 44px on every field too, not just buttons. These were ~40px, which is a
+     fiddly target on a phone held one-handed next to a noisy machine. */
+  min-height: 44px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -254,7 +313,13 @@ input[type=file] { padding: 8px; }
 input[type=checkbox] { width: auto; accent-color: var(--accent); }
 
 button, .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 44px is the smallest reliable touch target. These were 39px, on a UI whose
+     whole premise is that the owner uses it from a handset standing next to
+     the machine. */
+  min-height: 44px;
   padding: 10px 16px;
   border-radius: var(--radius-sm);
   border: 0;

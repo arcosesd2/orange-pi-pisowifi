@@ -98,13 +98,17 @@
       {% endif %}
     {% endif %}
 
-    <form method="post" action="/admin/collection" class="row"
+    {# class="row" did not exist in the stylesheet, and the button was left at
+       its natural width while the inputs above it were full-width. Use the
+       house .actions pattern so this card lines up with every other form. #}
+    <form method="post" action="/admin/collection"
           onsubmit="return confirm('Record emptying the coin box? This starts the count again from zero.')">
       <label for="counted">Counted (optional)</label>
-      <input id="counted" name="counted" type="number" min="0" placeholder="₱ actually in the box">
+      <input id="counted" name="counted" type="number" min="0" inputmode="numeric"
+             placeholder="₱ actually in the box">
       <label for="cnote">Note</label>
       <input id="cnote" name="note" type="text" placeholder="optional">
-      <button>I emptied the box</button>
+      <div class="actions"><button>I emptied the box</button></div>
     </form>
     <p class="hint">
       Leave the count blank to just reset the tally. Filling it in is what makes

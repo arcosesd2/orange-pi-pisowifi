@@ -56,6 +56,53 @@
       <label class="check"><input type="checkbox" name="show_pause" {{ 'checked' if b.show_pause }}>
         <span>Show <b>Pause / Resume</b> — lets customers bank unused time</span></label>
 
+    </section>
+
+    <section class="card">
+      <h2>Portal sounds</h2>
+      <p class="muted">
+        Plays on the customer's phone, not on the machine &mdash; the board has
+        no speaker. Sound is a bonus on top of the on-screen numbers: phones
+        block audio until the customer taps something, and the cut-down browser
+        some phones open a captive portal in may not play it at all.
+      </p>
+
+      <label class="check"><input type="checkbox" name="sound" {{ 'checked' if b.sound }}>
+        <span>Play sounds in the portal</span></label>
+
+      <label for="vol">Volume</label>
+      <input id="vol" name="sound_volume" type="range" min="0" max="100"
+             value="{{ b.sound_volume | default(60) }}">
+
+      <p class="hint">
+        Leaving the uploads empty uses short built-in tones that are
+        <b>generated in the browser</b> and cost nothing to send. Upload your
+        own only if you want them &mdash; every customer downloads the file over
+        the link they are sharing, on every visit. Keep them under 256&nbsp;KB;
+        anything longer than about a second is an annoyance, not a feature.
+      </p>
+
+      <label for="sc">Coin accepted <span class="muted">(each coin)</span></label>
+      {% if b.snd_coin %}
+        <p class="muted">Using <code>{{ b.snd_coin }}</code></p>
+        <label class="check"><input type="checkbox" name="clear_snd_coin"> <span>Use the built-in tone instead</span></label>
+      {% endif %}
+      <input id="sc" type="file" name="snd_coin" accept="audio/*">
+
+      <label for="sl">Two minutes left <span class="muted">(prompts a top-up)</span></label>
+      {% if b.snd_low %}
+        <p class="muted">Using <code>{{ b.snd_low }}</code></p>
+        <label class="check"><input type="checkbox" name="clear_snd_low"> <span>Use the built-in tone instead</span></label>
+      {% endif %}
+      <input id="sl" type="file" name="snd_low" accept="audio/*">
+
+      <label for="se">Time expired</label>
+      {% if b.snd_end %}
+        <p class="muted">Using <code>{{ b.snd_end }}</code></p>
+        <label class="check"><input type="checkbox" name="clear_snd_end"> <span>Use the built-in tone instead</span></label>
+      {% endif %}
+      <input id="se" type="file" name="snd_end" accept="audio/*">
+
       <div class="actions"><button>Save branding</button></div>
     </section>
   </form>

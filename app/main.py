@@ -1743,10 +1743,47 @@ def admin_branding():
                     name = key + ext
                     up.save(os.path.join(BRAND_DIR, name))
                     b[key] = name
+
+        # --- portal sounds ---
+        # Default is synthesised, not a file: a captive portal is served off an
+        # SD card over a shaped link to every phone in the shop, so the right
+        # default costs zero bytes. Uploads are for owners who want their own.
+        b["sound"] = f.get("sound") == "on"
+        try:
+            b["sound_volume"] = min(100, max(0, int(f.get("sound_volume") or 60)))
+        except ValueError:
+            b["sound_volume"] = 60
+        for key in ("snd_coin", "snd_low", "snd_end"):
+            if f.get("clear_" + key):
+                b[key] = ""
+            up = request.files.get(key)
+            if up and up.filename:
+                ext = os.path.splitext(up.filename)[1].lower()
+                if ext not in (".mp3", ".ogg", ".wav", ".m4a"):
+                    return render_template(
+                        "branding.html", name=setting("hotspot_name"), b=b,
+                        error="Sounds must be .mp3, .ogg, .wav or .m4a — "
+                              "%r is not." % ext)
+                # Hard size cap. Every byte of this crosses the customer link
+                # and is read off the SD card on each portal load; a 4 MB jingle
+                # would be paid for by every customer, every time.
+                up.seek(0, os.SEEK_END)
+                size = up.tell()
+                up.seek(0)
+                if size > 256 * 1024:
+                    return render_template(
+                        "branding.html", name=setting("hotspot_name"), b=b,
+                        error="That file is %.0f KB. Keep sounds under 256 KB — "
+                              "every customer downloads them over the shared "
+                              "link." % (size / 1024.0))
+                name = key + ext
+                up.save(os.path.join(BRAND_DIR, name))
+                b[key] = name
         db.set_setting("branding", b)
         _audit("branding updated")
         return redirect("/admin/branding")
-    return render_template("branding.html", name=setting("hotspot_name"), b=b)
+    return render_template("branding.html", name=setting("hotspot_name"), b=b,
+                           error=None)
 
 
 # ---------- admin: scheduled tasks + DNS blocklist ----------

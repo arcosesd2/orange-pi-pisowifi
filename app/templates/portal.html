@@ -145,6 +145,77 @@ async function post(url) {
   $('err').textContent = r.ok ? '' : (j.error || 'Something went wrong');
   refresh();
 }
+/* ---------------------------------------------------------------------------
+   Portal sounds.
+
+   Default is SYNTHESISED, not a file. This page is served off an SD card over
+   a link shared by every phone in the shop, so a jingle nobody asked for would
+   be paid for by all of them on every load. Web Audio costs zero bytes. An
+   owner who wants their own sound uploads one and it is used instead.
+
+   Two things browsers enforce that shape this:
+
+   1. Audio is blocked until the user interacts with the page. So the context
+      is unlocked on the first tap -- "INSERT COIN" is a tap, which is exactly
+      when a customer starts caring about coin feedback.
+   2. Captive-portal mini-browsers (iOS Captive Network Assistant especially)
+      are cut-down WebViews where audio may not work at all. Every call is
+      therefore wrapped and failure is silent: sound is a bonus on top of the
+      on-screen numbers, never the only feedback.
+--------------------------------------------------------------------------- */
+const SND = {
+  on:   {{ 'true' if brand.get('sound') else 'false' }},
+  vol:  {{ (brand.get('sound_volume', 60) | int) / 100.0 }},
+  coin: {{ (brand.get('snd_coin') or '') | tojson }},
+  low:  {{ (brand.get('snd_low')  or '') | tojson }},
+  end:  {{ (brand.get('snd_end')  or '') | tojson }}
+};
+let actx = null;
+const files = {};
+
+function unlockAudio() {
+  if (!SND.on || actx) return;
+  try {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) { actx = null; }
+  for (const k of ['coin', 'low', 'end']) {
+    if (!SND[k]) continue;
+    try {
+      const a = new Audio('/branding/' + SND[k]);
+      a.preload = 'auto';
+      a.volume = SND.vol;
+      files[k] = a;
+    } catch (e) { /* unsupported; falls back to the synth tone */ }
+  }
+}
+document.addEventListener('pointerdown', unlockAudio, {once: true});
+
+/* A short two-note chime, built rather than downloaded. */
+function beep(freq, ms, type) {
+  if (!actx) return;
+  try {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0001, SND.vol), actx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + ms / 1000);
+    o.connect(g).connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + ms / 1000);
+  } catch (e) { /* silent by design */ }
+}
+
+function play(kind) {
+  if (!SND.on) return;
+  const f = files[kind];
+  if (f) { try { f.currentTime = 0; f.play().catch(() => {}); return; } catch (e) {} }
+  if (kind === 'coin')      { beep(880, 90); setTimeout(() => beep(1320, 120), 90); }
+  else if (kind === 'low')  { beep(560, 200, 'triangle'); }
+  else if (kind === 'end')  { beep(440, 180); setTimeout(() => beep(300, 260), 190); }
+}
+
 const on = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
 on('insertBtn', () => post('/api/insert'));
 on('doneBtn',   () => post('/api/done'));
@@ -165,8 +236,29 @@ on('redeemBtn', async () => {
 });
 const tog = (id, c) => { const e = $(id); if (e) e.classList.toggle('hide', c); };
 
+/* Previous values, so sounds fire on a TRANSITION rather than on every poll --
+   the page refreshes once a second and a chime every second would be torture. */
+let lastPesos = null, warnedLow = false, wasRunning = false;
+
+function soundsFor(j) {
+  const pesos = (j.window && j.window.pesos) || 0;
+  if (lastPesos !== null && pesos > lastPesos) play('coin');
+  lastPesos = pesos;
+
+  const left = j.remaining || 0;
+  // Two minutes' warning: enough time to feed another coin rather than being
+  // cut off mid-video, which is the moment a customer decides whether to top
+  // up or give up on you.
+  if (left > 0 && left <= 120 && !j.paused && !warnedLow) { play('low'); warnedLow = true; }
+  if (left > 120) warnedLow = false;
+
+  if (wasRunning && left <= 0 && !j.paused) play('end');
+  wasRunning = left > 0;
+}
+
 function render(j) {
   if (!j || j.error) { if (j && j.error) $('err').textContent = j.error; return; }
+  try { soundsFor(j); } catch (e) { /* never let audio break the timer */ }
   $('timer').textContent = fmt(j.remaining);
   $('timer').classList.toggle('paused', j.paused);
   tog('pauseBtn', j.paused || j.remaining <= 0);

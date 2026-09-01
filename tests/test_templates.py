@@ -69,7 +69,12 @@ PAGES = {
         watch={"at": 1, "wan": True, "wan_fails": 0, "services": {"dnsmasq": True}}),
     "portal.html": dict(
         rates=[(1, 20), (5, 120)], brand={"color": "#fbbf24", "logo": "", "banner": "",
-        "show_redeem": True, "show_trial": True, "show_pause": True},
+        "show_redeem": True, "show_trial": True, "show_pause": True,
+        # Sounds ON with one custom file and two falling back to the built-in
+        # tone: that mix is what actually ships, and it is the combination
+        # where a quoting slip in the emitted JS would bite.
+        "sound": True, "sound_volume": 75,
+        "snd_coin": "snd_coin.mp3", "snd_low": "", "snd_end": ""},
         trial_enabled=True, trial_minutes=15, wallet_enabled=True, sse_enabled=False,
         unconfigured=True),
     "vouchers.html": dict(stats={"unused": 4, "used": 1, "total": 5}, profiles=["default"],
@@ -79,7 +84,9 @@ PAGES = {
         whitelist=[{"mac": "aa:bb:cc:dd:ee:ff", "label": "phone", "speed": None}], blacklist=[]),
     "audit.html": dict(entries=[{"at": 1700000000, "ip": "10.0.0.5",
                                  "action": "admin login", "detail": ""}]),
-    "branding.html": dict(b={"color": "#fbbf24", "logo": "", "banner": "",
+    "branding.html": dict(error=None, b={"color": "#fbbf24", "logo": "", "banner": "",
+                           "sound": True, "sound_volume": 60,
+                           "snd_coin": "snd_coin.mp3", "snd_low": "", "snd_end": "",
                              "show_redeem": True, "show_trial": True, "show_pause": True}),
     "schedules.html": dict(schedules=[{"type": "reboot", "time": "03:00", "days": []}],
         dns_filter=False, error=None,

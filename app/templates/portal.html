@@ -102,12 +102,32 @@
   /* Keyboard focus must stay visible for anyone not using touch. */
   .big:focus-visible, .code:focus-visible {
     outline:3px solid var(--sky-3); outline-offset:2px; }
+  .brandmark { width:100%; max-width:420px; text-align:center; }
+  /* Sized by WIDTH, capped by height. A logo's aspect ratio is the designer's
+     decision, and height-only sizing punishes a wide one -- which this is. */
+  .brandmark img { width:min(74%,300px); max-height:22vh; height:auto;
+                   object-fit:contain; display:block; margin:0 auto;
+                   filter:drop-shadow(0 4px 14px rgba(0,30,50,.45)); }
+  .netname { margin-top:2px; font-size:.8rem; letter-spacing:.14em;
+             text-transform:uppercase; color:rgba(255,255,255,.82);
+             text-shadow:0 1px 8px rgba(0,40,70,.6); }
 </style>
 {% if brand.color %}<style>:root { --accent:{{ brand.color }}; }</style>{% endif %}
 </head>
 <body>
   {% if brand.banner %}<img class="banner" src="/branding/{{ brand.banner }}" alt="">{% endif %}
-  <h1>{% if brand.logo %}<img src="/branding/{{ brand.logo }}" alt="" style="height:1.3em;vertical-align:middle;margin-right:6px">{% else %}📶 {% endif %}{{ name }}</h1>
+  {# A logo is a wordmark: it already says who this is. Squeezing it to 1.3em
+     beside the hotspot name gave a ~9px mark AND said the name twice. Given a
+     logo, show it properly and let the network name sit under it as the small
+     practical detail ("which SSID am I on"), which is what it actually is. #}
+  {% if brand.logo %}
+  <header class="brandmark">
+    <img src="/branding/{{ brand.logo }}" alt="{{ name }}">
+    <div class="netname">{{ name }}</div>
+  </header>
+  {% else %}
+  <h1>📶 {{ name }}</h1>
+  {% endif %}
   {% if unconfigured %}
   <!-- Only on a machine that has never had its admin password set. A card
        straight off a master image has no other way to tell its owner where

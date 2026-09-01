@@ -97,6 +97,32 @@ for path in ("/admin/reboot", "/admin/restart-service"):
     check("customer POST %-22s is refused" % path,
           "BLOCKED" if blocked else "REACHABLE", "BLOCKED")
 
+print("\n=== a denied customer must learn NOTHING ===")
+# The response has to be indistinguishable from an unknown path, or /admin
+# advertises its own existence to whoever knocks.
+main.db.set_setting("admin_lan_access", "tailscale")
+main.tailscale.status = lambda: {"installed": True, "running": True,
+                                 "ip4": "100.101.102.103"}
+with main.app.test_request_context("/admin", environ_base={"REMOTE_ADDR": CUSTOMER}):
+    denied_resp = main._admin_guard()
+with main.app.test_request_context("/nope", environ_base={"REMOTE_ADDR": CUSTOMER}):
+    unknown_resp = main.catchall("nope")
+
+check("denied /admin returns a redirect, not an error page",
+      getattr(denied_resp, "status_code", None), 302)
+check("...to the same place an unknown path goes",
+      denied_resp.headers.get("Location") == unknown_resp.headers.get("Location"),
+      True)
+check("...with the same status as an unknown path",
+      denied_resp.status_code == unknown_resp.status_code, True)
+
+body = (denied_resp.get_data(as_text=True) or "").lower()
+hdrs = " ".join("%s %s" % (k, v) for k, v in denied_resp.headers).lower()
+leak = body + " " + hdrs
+for word in ("admin", "tailscale", "config.json", "admin_lan_access",
+             "recover", "lockout", "100."):
+    check("response never mentions %-18s" % ("'%s'" % word), word in leak, False)
+
 print()
 if fails:
     print("%d ADMIN GATE FAILURE(S):" % len(fails))

@@ -370,7 +370,21 @@ def _admin_guard():
         return None
     denied = _admin_lan_denied()
     if denied:
-        return denied, 403
+        # Answer exactly as if the path did not exist: the same 302 to the
+        # portal that catchall() gives any unknown URL. A customer poking at
+        # /admin gets what they would get for /nope, and learns nothing.
+        #
+        # It used to return 403 with an explanation, which told anyone who
+        # asked three things they should not have: that an admin panel exists
+        # here at all, that the owner reaches it over Tailscale, and -- worst --
+        # the exact recovery procedure, naming the config file and the setting
+        # to change. That last one is a recipe served to whoever knocks.
+        #
+        # The reason is still recorded, but in the audit log where the owner
+        # can see it and a customer cannot.
+        _audit("admin_denied",
+               "%s (%s)" % (request.path, denied.split("\n")[0]))
+        return redirect(f"http://{CFG['gateway_ip']}:{CFG['portal_port']}/", 302)
     # A machine still on the shipped password can do nothing but change it.
     if (admin_ok() and db.admin_password_is_default()
             and request.path not in ("/admin/setup", "/admin/logout")):

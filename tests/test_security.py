@@ -60,11 +60,18 @@ try:
           c.get("/admin/login", environ_base=LAN).status_code, 200)
 
     reset(whitelist=(OTHER,))
-    check("locked down: customer on LAN is refused",
-          c.get("/admin/login", environ_base=LAN).status_code, 403)
-    check("refusal explains the recovery path",
-          "admin_lan_access" in c.get("/admin", environ_base=LAN).get_data(as_text=True),
-          True)
+    # A refused customer is answered exactly as if the path did not exist: the
+    # same 302 to the portal that any unknown URL gets. This used to be a 403
+    # that explained itself, and the explanation named the config file and the
+    # setting to change -- a recovery procedure handed to whoever knocked, on
+    # top of confirming an admin panel was there at all. The reason now goes to
+    # the audit log, where the owner sees it and a customer does not.
+    refused = c.get("/admin/login", environ_base=LAN)
+    check("locked down: customer on LAN gets the unknown-path redirect",
+          refused.status_code, 302)
+    body = c.get("/admin", environ_base=LAN).get_data(as_text=True).lower()
+    for leak in ("admin_lan_access", "tailscale", "config.json", "recover"):
+        check("refusal never mentions %-18s" % ("'%s'" % leak), leak in body, False)
     check("locked down: the box itself still gets in",
           c.get("/admin/login", environ_base=BOX).status_code, 200)
 

@@ -182,7 +182,10 @@
     A customer who turns on their phone's hotspot can serve several people from
     one payment. This detects it by watching the TTL of arriving packets: a
     device that forwards for others shows <b>two</b> different TTLs at once
-    &mdash; its own traffic and the traffic it is relaying.
+    &mdash; its own traffic and the traffic it is relaying. Which values those
+    are does not matter and is never assumed; each device's own baseline is
+    whatever its highest TTL turns out to be, so an access point that routes
+    rather than bridges cannot hide the second population behind it.
   </p>
 
   <table class="kv">
@@ -210,13 +213,39 @@
       <b>Using a VPN, not sharing &mdash; deliberately left alone</b>
       <p class="muted">
         {% for mac in tether.vpn_like %}<code>{{ mac }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-        &mdash; every packet from these arrives one TTL lower, but only ever at
-        one value. That is an on-device VPN or ad blocker re-injecting traffic
-        through a local tunnel, not a hotspot. An earlier version of this
-        feature blocked exactly this pattern and cut those customers off the
-        internet entirely.
+        &mdash; a second TTL has appeared from these, but it has carried almost
+        no traffic ({{ tether.threshold }} packets is the line). That is an
+        on-device VPN or ad blocker leaking a few packets outside its own
+        tunnel, not a hotspot. An earlier version of this feature blocked
+        exactly this pattern and cut those customers off the internet entirely.
       </p>
     </div>
+  {% endif %}
+
+  {% if tether.detail %}
+    <details class="card">
+      <summary><b>Evidence</b> &mdash; what each device's packets actually arrived as</summary>
+      <p class="muted">
+        Published so a detection can be checked rather than trusted. The
+        baseline is the device's own highest TTL; anything below it is traffic
+        that device forwarded for something else.
+      </p>
+      <table class="kv">
+        <tr><th>Device</th><th>Baseline</th><th>TTLs seen (packets)</th><th>Forwarded</th></tr>
+        {% for mac, d in tether.detail.items() %}
+          <tr>
+            <td><code>{{ mac }}</code></td>
+            <td>{{ d.baseline }}</td>
+            <td>
+              {% for ttl, pkts in d.ttls.items() %}
+                {{ ttl }}&nbsp;({{ pkts }}){% if not loop.last %}, {% endif %}
+              {% endfor %}
+            </td>
+            <td>{{ d.forwarded }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    </details>
   {% endif %}
 
   <form method="post" action="/admin/tether/settings">

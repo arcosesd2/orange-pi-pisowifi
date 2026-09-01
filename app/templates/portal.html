@@ -111,6 +111,18 @@
   .netname { margin-top:2px; font-size:.8rem; letter-spacing:.14em;
              text-transform:uppercase; color:rgba(255,255,255,.82);
              text-shadow:0 1px 8px rgba(0,40,70,.6); }
+  /* Shown only when audio has genuinely not unlocked. Browsers require a
+     gesture before a page may make noise, and a customer holding a coin has no
+     way to guess that -- so ask, once, instead of playing nothing in silence.
+     Sits clear of the home-bar area on a phone. */
+  .sndhint { position:fixed; left:50%; transform:translateX(-50%);
+             bottom:calc(14px + env(safe-area-inset-bottom));
+             z-index:50; padding:11px 18px; border-radius:999px;
+             background:rgba(4,26,42,.86); color:#eaf6ff;
+             border:1px solid rgba(255,255,255,.18);
+             font-size:.82rem; letter-spacing:.02em; white-space:nowrap;
+             box-shadow:0 6px 20px rgba(0,20,40,.45);
+             backdrop-filter:blur(6px); cursor:pointer; }
 </style>
 {% if brand.color %}<style>:root { --accent:{{ brand.color }}; }</style>{% endif %}
 </head>
@@ -247,15 +259,27 @@ async function post(url) {
    be paid for by all of them on every load. Web Audio costs zero bytes. An
    owner who wants their own sound uploads one and it is used instead.
 
-   Two things browsers enforce that shape this:
+   Three things browsers enforce that shape this. All three were learned from a
+   machine in a shop that played nothing at all:
 
-   1. Audio is blocked until the user interacts with the page. So the context
-      is unlocked on the first tap -- "INSERT COIN" is a tap, which is exactly
-      when a customer starts caring about coin feedback.
-   2. Captive-portal mini-browsers (iOS Captive Network Assistant especially)
-      are cut-down WebViews where audio may not work at all. Every call is
-      therefore wrapped and failure is silent: sound is a bonus on top of the
-      on-screen numbers, never the only feedback.
+   1. Audio is blocked until the user interacts with the page -- and dropping a
+      coin in is NOT an interaction. The customer is holding a coin, not the
+      phone. The first version unlocked on `pointerdown` with {once:true}, so a
+      customer who never tapped the screen got silence forever; and a single
+      failed attempt was permanent, because the listener had already been spent.
+      That is exactly the case that matters, so unlock is now retried on every
+      gesture and the listeners come off only once the context reports running.
+
+   2. On iOS the physical ringer switch silences Web Audio outright while
+      leaving <audio> elements audible. A synthesised tone is inaudible on a
+      muted iPhone however correct the code is, so a silent loop is started on
+      the first gesture to move the page onto the media channel instead.
+
+   3. Captive-portal mini-browsers (iOS Captive Network Assistant, Android's
+      CaptivePortalLogin WebView) are cut down and may refuse audio entirely.
+      Every call is wrapped and failure is silent: sound is a bonus on top of
+      the on-screen numbers, never the only feedback. When it has not unlocked,
+      the page says so quietly rather than pretending it worked.
 --------------------------------------------------------------------------- */
 const SND = {
   on:   {{ 'true' if brand.get('sound') else 'false' }},
@@ -264,26 +288,86 @@ const SND = {
   low:  {{ (brand.get('snd_low')  or '') | tojson }},
   end:  {{ (brand.get('snd_end')  or '') | tojson }}
 };
+
+/* A 44-byte silent WAV, played on loop from the first gesture so iOS puts this
+   page on the media channel rather than the ringer channel. Without it a phone
+   with the side switch flicked to silent plays nothing and the page cannot
+   tell the difference between that and working correctly. */
+const SILENCE = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
 let actx = null;
+let unlocked = false;
+let keeper = null;
 const files = {};
 
-function unlockAudio() {
-  if (!SND.on || actx) return;
+/* Built at load, not inside the unlock. Constructing an Audio needs no gesture,
+   and doing it here means a coin that lands before the customer has touched the
+   screen still has something ready to play the instant the page unlocks. */
+for (const k of ['coin', 'low', 'end']) {
+  if (!SND.on || !SND[k]) continue;
   try {
-    actx = new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === 'suspended') actx.resume();
-  } catch (e) { actx = null; }
-  for (const k of ['coin', 'low', 'end']) {
-    if (!SND[k]) continue;
-    try {
-      const a = new Audio('/branding/' + SND[k]);
-      a.preload = 'auto';
-      a.volume = SND.vol;
-      files[k] = a;
-    } catch (e) { /* unsupported; falls back to the synth tone */ }
-  }
+    const a = new Audio('/branding/' + SND[k]);
+    a.preload = 'auto';
+    a.volume = SND.vol;
+    files[k] = a;
+  } catch (e) { /* unsupported; falls back to the synth tone */ }
 }
-document.addEventListener('pointerdown', unlockAudio, {once: true});
+
+function unlockAudio() {
+  if (!SND.on || unlocked) return;
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume().catch(() => {});
+  } catch (e) { actx = null; }
+
+  /* Prime each clip inside the gesture. A play() that is immediately paused is
+     what buys the right to call play() later from a timer -- which is when a
+     coin actually arrives, with nobody touching the screen. */
+  for (const k of Object.keys(files)) {
+    try {
+      const a = files[k], v = a.volume;
+      a.volume = 0;
+      const p = a.play();
+      const restore = () => { try { a.pause(); a.currentTime = 0; } catch (e) {} a.volume = v; };
+      if (p && p.then) p.then(restore).catch(restore); else restore();
+    } catch (e) { /* leave it; the synth path still exists */ }
+  }
+
+  if (!keeper) {
+    try {
+      keeper = new Audio(SILENCE);
+      keeper.loop = true;
+      keeper.volume = 0.001;
+      keeper.play().catch(() => {});
+    } catch (e) { keeper = null; }
+  }
+
+  if (actx && actx.state === 'running') { unlocked = true; soundHint(false); }
+}
+
+/* More than one event, and NOT {once:true}: a single failed attempt used to be
+   permanent. Listeners are removed only once the context is genuinely running. */
+const GESTURES = ['pointerdown', 'touchend', 'click', 'keydown'];
+function onGesture() {
+  unlockAudio();
+  if (unlocked) for (const ev of GESTURES) document.removeEventListener(ev, onGesture);
+}
+for (const ev of GESTURES) document.addEventListener(ev, onGesture, {passive: true});
+
+/* One tap is all it needs, but the customer has no way to know that. Say so,
+   quietly, and only if it has genuinely not unlocked on its own. */
+function soundHint(show) {
+  const old = document.getElementById('sndHint');
+  if (!show) { if (old) old.remove(); return; }
+  if (old) return;
+  const el = document.createElement('div');
+  el.id = 'sndHint';
+  el.className = 'sndhint';
+  el.textContent = 'Tap anywhere to turn on sound';
+  el.onclick = () => { unlockAudio(); soundHint(false); };
+  document.body.appendChild(el);
+}
+if (SND.on) setTimeout(() => { if (!unlocked) soundHint(true); }, 1500);
 
 /* A short two-note chime, built rather than downloaded. */
 function beep(freq, ms, type) {
@@ -301,13 +385,29 @@ function beep(freq, ms, type) {
   } catch (e) { /* silent by design */ }
 }
 
-function play(kind) {
-  if (!SND.on) return;
-  const f = files[kind];
-  if (f) { try { f.currentTime = 0; f.play().catch(() => {}); return; } catch (e) {} }
+/* The synthesised fallback, split out so a failed file playback can reach it.
+   It could not before: play() returned the moment the file existed, and the
+   rejected promise was swallowed by an empty catch. An uploaded clip that the
+   browser declined to play therefore produced silence rather than the tone the
+   uploaded clip had replaced. */
+function synth(kind) {
   if (kind === 'coin')      { beep(880, 90); setTimeout(() => beep(1320, 120), 90); }
   else if (kind === 'low')  { beep(560, 200, 'triangle'); }
   else if (kind === 'end')  { beep(440, 180); setTimeout(() => beep(300, 260), 190); }
+}
+
+function play(kind) {
+  if (!SND.on) return;
+  const f = files[kind];
+  if (f) {
+    try {
+      f.currentTime = 0;
+      const p = f.play();
+      if (p && p.catch) p.catch(() => synth(kind));
+      return;
+    } catch (e) { /* fall through to the tone */ }
+  }
+  synth(kind);
 }
 
 const on = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };

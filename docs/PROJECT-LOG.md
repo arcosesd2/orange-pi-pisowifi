@@ -731,3 +731,87 @@ never by importing its module again.**
 - [ ] Root password is cloned into every card (`/etc/shadow`); treat as a fleet
       secret, or set key-only SSH before imaging.
 - [ ] Branch is not merged to `master`; the prebuilt deployer `.exe` is stale.
+
+## 2026-09-01 (later) - three field bugs, three silent failures
+
+Owner's report from the shop, with two paid phones and a third tethered off
+one of them: no sound; the tethered phone browses freely; one paid phone
+capped, the other not, until a later retry. All three were features that
+reported success while doing nothing. None threw.
+
+### Speed cap: the neighbour table is a cache
+
+`_ip_for_mac()` asked only `ip neigh`. A phone quiet for a minute shows
+`10.0.0.109 FAILED` there while holding a perfectly good lease. No IP, no tc
+class, no cap -- and the shaper does not complain about a session it was never
+told about. Once the phone spoke and became REACHABLE the next reconcile capped
+it, which is exactly "no cap, then after 2nd try it's limited". Fixed with a
+fallback to `/var/lib/misc/dnsmasq.leases`: a customer cannot reach the portal
+without a lease, so the lease file always knows a paying device. Verified two
+HTB leaf classes where there had been one.
+
+### Tethering: v2 could never fire, and its enforcement was dead anyway
+
+Installed a throwaway `(MAC . TTL)` set with counters while the owner had a
+phone deliberately sharing. Twelve seconds of truth:
+
+    66:11:ee:1a:ec:6d . 63      8 packets   <- the phone
+    66:11:ee:1a:ec:6d . 62   1724 packets   <- the phone behind it
+
+The phone's OWN traffic arrives at 63. v2 decided "own traffic" by testing
+`ip ttl { 64, 128, 255 }`, which therefore matched nothing for any customer;
+`ttl_norm` stayed empty; and since tethering required both sets, it reported
+"none detected" all evening. **Never hardcode what a normal TTL is.**
+
+v3 keys one set on the pair -- `typeof ether saddr . ip ttl`, `counter` per
+element, both supported on nft 1.1.3 -- and the app learns each device's
+baseline as its own highest TTL. Anything below that, in volume (25 packets;
+a VPN leak is single digits, a shared device is thousands), is sharing. No
+absolute TTL anywhere in the logic. Test suite drives the real parser with
+nft-format text and carries the hardware numbers as a regression.
+
+Then detection fired and the tethered phone *still* browsed. The MAC was in
+`tether_block`; the audit log said "limiting". Counters on the rule:
+
+    oifname LAN ether daddr @tether_block ip ttl set 1   -> 0 packets
+    oifname LAN ip daddr 10.0.0.100                      -> 30 packets
+
+**`ether daddr` matches nothing in postrouting** -- the outgoing Ethernet
+header does not exist yet at that hook, and nft does not say so. The rule had
+been a no-op since it was written. Enforcement now writes the IP (resolved
+from the lease, above) to a parallel `tether_block_ip` set and the rule
+matches `ip daddr`. Every confirmed device is re-pushed each reconcile so a
+lease renewal is followed. When a rule does nothing, put a counter on it
+before theorising.
+
+Owner's observation that fits: a laptop on the tethering phone's hotspot sees
+the *phone's* timer on the portal. The phone NATs, so the laptop arrives as
+the phone. Inherent, and the reason TTL is the only lever.
+
+### Sound: a coin is not a gesture
+
+Config was fine -- served `on: true`, all three clips. The gate was wrong.
+`unlockAudio` was bound to `pointerdown` with `{once:true}`; the customer is
+holding a coin, not the phone, so anyone who had not tapped had no context and
+no clips, forever, and one failed unlock was permanent. Also: a clip the
+browser refused to play `return`ed past the synth fallback with the rejection
+swallowed. And on iOS the ringer switch mutes Web Audio while `<audio>` still
+plays. Now: clips built at load; unlock retried on every gesture until the
+context reports running; each clip primed with a silent play/pause inside the
+gesture; a silent loop to move iOS onto the media channel; a "tap anywhere to
+turn on sound" chip after 1.5 s if it has not unlocked. Browsers require a
+gesture and nothing can bypass that; the honest fix is to ask.
+
+### Two firewall reloads over the tunnel
+
+Each with `nft -c` first, a `flush ruleset` + `nft list ruleset` snapshot, and
+a detached 150 s auto-rollback cancelled by touching a file once the next SSH
+got through. Cheap insurance for editing the firewall you are logged in
+through.
+
+### Open items
+
+- [ ] Owner to confirm the tethered phone has lost internet with the IP rule
+      live, and that one tap on the portal makes the next coin audible.
+- [ ] Why the phone's own TTL is 63 with MACs preserved is not explained (not
+      an L3 hop). Irrelevant to v3, which assumes nothing -- but worth a look.

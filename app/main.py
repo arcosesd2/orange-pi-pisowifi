@@ -528,19 +528,59 @@ def _resolve_speed(name):
     return (setting("speed_profiles") or {}).get(name)
 
 
+DNSMASQ_LEASES = "/var/lib/misc/dnsmasq.leases"
+
+
+def _ip_from_leases(mac):
+    """MAC -> IP from dnsmasq's lease file.
+
+    The neighbour table is a cache of who has spoken recently; the lease file
+    is the record of who was given what. A customer cannot reach the portal
+    without a DHCP lease, so by the time they are paying, this always knows
+    them -- which is not true of the neighbour table.
+    """
+    try:
+        with open(DNSMASQ_LEASES) as fh:
+            for line in fh:
+                f = line.split()
+                # expiry MAC IP hostname client-id
+                if len(f) >= 3 and f[1].lower() == mac:
+                    return f[2]
+    except OSError:
+        pass
+    return None
+
+
 def _ip_for_mac(mac):
-    """Reverse of client_mac(): current LAN IP for a MAC, via the neighbor table."""
+    """Current LAN IP for a MAC. Reverse of client_mac().
+
+    Two sources, because relying on the neighbour table alone left paying
+    customers UNSHAPED. That table only holds devices that have sent traffic
+    recently: it is empty for the first seconds of a session, and an entry can
+    fall to STALE, FAILED or INCOMPLETE while a phone sits idle. Whenever the
+    lookup failed, _apply_speed() had no IP to build a tc class for, so that
+    customer ran at full uplink speed until some later reconcile happened to
+    catch them -- or never.
+
+    Observed on the live machine: three paying sessions, one tc class. The
+    unshaped phone had `10.0.0.109 INCOMPLETE` in the neighbour table and a
+    perfectly good lease for 10.0.0.109 in dnsmasq's file.
+    """
     if MOCK or not mac:
         return None
+    mac = mac.lower()
     try:
-        out = subprocess.run(["ip", "neigh", "show"], capture_output=True, text=True).stdout
+        out = subprocess.run(["ip", "neigh", "show"],
+                             capture_output=True, text=True).stdout
         for line in out.splitlines():
             parts = line.split()
             if "lladdr" in parts and parts[parts.index("lladdr") + 1].lower() == mac:
+                # INCOMPLETE/FAILED entries carry no usable address state, but
+                # the address itself is still the right one to shape.
                 return parts[0]
     except Exception:
         pass
-    return None
+    return _ip_from_leases(mac)
 
 
 # MACs we wanted to shape but could not, and why. Read by the dashboard so a
@@ -1646,7 +1686,9 @@ def admin_tether_release():
     if not admin_ok():
         return redirect("/admin/login")
     mac = (request.form.get("mac") or "").strip().lower()
-    if tether.release(mac):
+    # The IP entry is what the TTL rule actually matches, so clear it too;
+    # leaving it would keep the device limited until the entry timed out.
+    if tether.release(mac, _ip_for_mac(mac)):
         db.log_audit("tether_released", mac)
         return _remote_page(msg="%s is no longer limited." % mac)
     return _remote_page(error="Could not release %s." % (mac or "that device"))
@@ -2230,9 +2272,11 @@ def _enforce_tethering():
     Detection runs whenever anti_tether is on, because observing costs nothing
     and the owner should be able to see what is happening before deciding to
     act on it. Enforcement is a separate switch, and only ever touches MACs
-    that showed BOTH an own-traffic TTL and a forwarded one -- never a device
-    that merely runs a VPN. See app/tether.py for why that distinction is the
-    whole feature.
+    that showed traffic arriving BELOW their own learned baseline TTL, in
+    enough volume to rule out a VPN leaking a few packets outside its tunnel
+    -- never a device that merely runs a VPN. See app/tether.py for why that
+    distinction is the whole feature, and for the two earlier versions that got
+    it wrong in opposite directions.
     """
     if not setting("anti_tether") or not setting("anti_tether_enforce"):
         return
@@ -2242,14 +2286,23 @@ def _enforce_tethering():
     except Exception as e:                                   # pragma: no cover
         app.logger.warning("tether: detection failed: %s", e)
         return
-    new = macs - tether.blocked_macs()
-    if new:
-        pushed = tether.enforce(new)
-        for mac in sorted(pushed):
-            app.logger.warning(
-                "tether: %s is sharing its connection -- limiting it to the "
-                "paying device", mac)
-            db.log_audit("tether_enforced", mac)
+    if not macs:
+        return
+    # Every confirmed device is pushed every cycle, not only the new ones.
+    # Adding is idempotent and refreshes both the timeout and the IP entry,
+    # so a device that renews its lease onto a different address keeps being
+    # enforced instead of escaping when the old IP quietly ages out.
+    already = tether.blocked_macs()
+    pushed = tether.enforce(macs, _ip_for_mac)
+    for mac in sorted(pushed - already):
+        app.logger.warning(
+            "tether: %s is sharing its connection -- limiting it to the "
+            "paying device", mac)
+        db.log_audit("tether_enforced", mac)
+    for mac in sorted(macs - pushed - already):
+        app.logger.info(
+            "tether: %s is sharing but has no lease to resolve an IP from; "
+            "will retry", mac)
 
 
 def reconcile():

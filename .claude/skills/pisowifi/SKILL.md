@@ -172,6 +172,34 @@ Rendering all templates against representative context catches syntax errors;
 piping each emitted `<script>` through `node --check` catches the escaping bug
 that rendering alone will not.
 
+### 2d. Portal audio: a coin drop is not a browser gesture
+
+**Fails, with sound enabled, clips uploaded, and the page serving `on: true`:**
+
+    FAILS   document.addEventListener('pointerdown', unlockAudio, {once: true});
+            // clips constructed inside unlockAudio
+            // f.play().catch(() => {}); return;     <- fallback unreachable
+
+The customer is holding a coin, not the phone. Anyone who never tapped had no
+AudioContext and no clips, forever; one failed unlock was permanent because the
+listener had already been spent; and a clip the browser refused to play
+returned past the synthesised fallback with the rejection swallowed.
+
+    WORKS   construct Audio() at load;
+            bind pointerdown/touchend/click/keydown ({passive:true}) and retry
+              until actx.state === 'running', only then remove the listeners;
+            inside the gesture, volume-0 play()->pause() each clip -- that is
+              what earns a later timer-driven play();
+            loop a 44-byte silent WAV from the first gesture (iOS ringer switch
+              mutes Web Audio but not <audio>);
+            play(): file, and on rejection -> synth;
+            after ~1.5 s not unlocked, show "Tap anywhere to turn on sound".
+
+Browsers require a gesture and nothing bypasses that; captive-portal
+mini-browsers (iOS CNA, Android CaptivePortalLogin) may refuse audio outright.
+The honest fix is to ask for the tap. **Test by not tapping:** insert a coin
+(silence, chip visible), tap once (chip gone), insert another (sound).
+
 ---
 
 ## 3. nftables (Debian 13 ships 1.1.3)
@@ -227,12 +255,31 @@ produces exactly that split.
 
 **Tethering is two TTL populations from one MAC at once**, not a low one:
 
-    64 only          the device, however it routes internally
-    63 only          on-device VPN — NOT tethering, leave it alone
-    64 and 63        it is forwarding for something else
+    one value only         the device, however it routes internally (VPN included)
+    two values, in volume  it is forwarding for something else
 
-Record into two sets and intersect in userspace; enforce per confirmed MAC,
-never with a blanket rule.
+**And never hardcode which values are "normal".** v2 sorted packets with
+`ip ttl { 64, 128, 255 }` -> own traffic, else -> forwarded, tethering = MAC in
+both sets. Measured through the shop's AP with a phone deliberately sharing:
+
+    66:11:ee:1a:ec:6d . 63      8 packets   <- the phone itself
+    66:11:ee:1a:ec:6d . 62   1724 packets   <- the phone behind it
+
+The phone's OWN traffic arrives at **63**. The `{64,128,255}` test matched
+nothing for anybody, `ttl_norm` stayed empty forever, and the feature said
+"none detected" all evening. Silent, like everything else here.
+
+    FAILS   ip ttl { 64, 128, 255 } update @ttl_norm { ether saddr }
+            ip ttl != { 64, 128, 255 } update @ttl_fwd { ether saddr }
+    WORKS   set ttl_seen { typeof ether saddr . ip ttl; flags dynamic, timeout; counter; }
+            iifname $LAN_IF update @ttl_seen { ether saddr . ip ttl counter }
+
+Then in userspace: baseline = that MAC's **highest** TTL; forwarded = packets
+below it; tethering = forwarded >= 25. The volume floor is what separates a
+VPN leaking single-digit packets from a shared device sending thousands. Both
+`typeof ether saddr . ip ttl` and per-element `counter` work on nft 1.1.3.
+Enforce per confirmed device, never with a blanket rule -- and see 3h for how
+to key the enforcement rule, because the obvious way is dead.
 
 ### 3e. A set that rules add to needs `flags dynamic`
 
@@ -284,6 +331,43 @@ a session with 1h32m left returned intact, matching the DB), but anything that
 reloads the ruleset must be followed by a reconcile, not left to the next timer
 tick.
 
+### 3h. `ether daddr` matches nothing in postrouting
+
+**Fails, silently, and the audit log says it worked:**
+
+    FAILS   chain mangle_post { type filter hook postrouting ...;
+              oifname $LAN_IF ether daddr @tether_block ip ttl set 1 }
+    WORKS   set tether_block_ip { type ipv4_addr; flags timeout; timeout 30m; }
+              oifname $LAN_IF ip daddr @tether_block_ip ip ttl set 1
+
+At the postrouting hook the outgoing Ethernet header has not been built yet,
+so an L2 match there is impossible -- and nft accepts the rule without a word.
+Proven with counters on the same traffic over twelve seconds: `ether daddr`
+0 packets, `ip daddr` 30. The block set filled, the app logged "limiting",
+the shared phone kept browsing.
+
+Anything acting on the **return path** to a customer (postrouting / output)
+must be keyed on IP, resolved from the MAC at write time (see 8b for where
+that IP has to come from). Keep the MAC set as the identity for admin and
+audit; maintain the IP set beside it; re-push every reconcile so a lease
+renewal is followed. `ether saddr` on ingress (prerouting / forward) is fine.
+
+**When a rule appears to do nothing, put `counter` on it before theorising.**
+It costs one word and settles the question in seconds.
+
+### 3i. Reload the firewall you are logged in through with a rollback armed
+
+Both reloads today were over Tailscale. Pattern that made that safe:
+
+```sh
+nft -c -f /etc/nftables.conf                                     # validate first
+{ echo "flush ruleset"; nft list ruleset; } > /root/pre.nft      # snapshot
+rm -f /run/reload-ok
+setsid bash -c 'sleep 150; [ -f /run/reload-ok ] || nft -f /root/pre.nft' \
+    >/dev/null 2>&1 < /dev/null &
+systemctl restart nftables
+# ...next SSH that gets through:  touch /run/reload-ok
+```
 
 ---
 
@@ -505,9 +589,21 @@ the board or a client reboots. This machine has a scheduled nightly reboot, so
   classes under a parent that no longer exists and every unchecked tc call
   fails quietly. `shaper.ensure_setup()` rebuilds the root only when it is
   genuinely missing, since `setup()` tears down every client class.
-- **`_ip_for_mac()` returns None right after any reboot** — the neighbour table
-  is empty until the client sends a packet. A normal transient, but it must be
-  reported as pending rather than assumed applied.
+- **`ip neigh` is a cache, not a record. Resolve MAC -> IP from the DHCP
+  lease file.** The neighbour table only knows who spoke recently; a paid phone
+  quiet for a minute shows `10.0.0.109 FAILED` there while holding a valid
+  lease. `_ip_for_mac()` read only neigh, returned None, and the shaper was
+  simply never told about that session -- two paid phones, one tc class, and
+  the second phone at full speed until it happened to send a packet and the
+  next reconcile caught it.
+
+      FAILS   ip neigh show            (None for a quiet client -> no cap, no error)
+      WORKS   ip neigh, then fall back to /var/lib/misc/dnsmasq.leases
+              (format: expiry MAC IP hostname client-id)
+
+  A customer cannot reach the portal without a lease, so the lease file always
+  knows a paying device. Verify with `tc class show dev $LAN_IF`: one leaf per
+  paid session, class id = last IP octet in hex.
 - **Verify, do not assume.** `shaper.limit()` reads the kernel back and returns
   whether the class exists; the dashboard counts what the kernel is doing, not
   what was asked for.

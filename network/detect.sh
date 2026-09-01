@@ -227,31 +227,49 @@ if os.path.exists(src):
     # counter, so a blocked device shows up as a number instead of a mystery.
     anti = antifwd = ""
     if cfg.get("anti_tether"):
-        # Observation only. Classifying every client packet by whether its TTL
-        # is an OS initial value or one lower, and recording the MAC. Nothing
-        # is dropped here; a MAC that lands in BOTH sets is the tethering
-        # signal, and that intersection is computed in the app.
-        antifwd = (
-            "        iifname %s ip ttl { 64, 128, 255 } "
-            "update @ttl_norm { ether saddr }\n"
-            "        iifname %s ip ttl != { 64, 128, 255 } "
-            "update @ttl_fwd { ether saddr }" % (lan_dev, lan_dev))
+        # Observation only: record (MAC, arriving TTL) and count the packets.
+        # Nothing is dropped here, and nothing is classified here either -- the
+        # rule states no opinion about which TTLs are "normal", which is the
+        # whole point. Two different TTLs from one MAC is the tethering signal,
+        # and that comparison is made in the app against whatever baseline that
+        # particular device turns out to have.
+        #
+        # The previous version tested `ip ttl { 64, 128, 255 }` here to decide
+        # what a device originated itself. Through an AP that routes rather
+        # than bridges, every customer arrives one lower and that test matched
+        # nothing for anybody -- so the feature silently reported no tethering
+        # regardless of what was happening. Measured on hardware: a phone
+        # sharing its connection showed 63 for itself and 62 for the device
+        # behind it, and neither is in that set.
+        antifwd = ("        iifname %s update @ttl_seen "
+                   "{ ether saddr . ip ttl counter }" % lan_dev)
         if cfg.get("anti_tether_enforce"):
-            # Enforcement is per device and applies ONLY to MACs the app has
+            # Enforcement is per device and applies ONLY to devices the app has
             # confirmed. TTL 1 still reaches the phone -- it is the last hop --
             # but dies the moment the phone forwards it to anything behind it.
             #
-            # It is scoped to @tether_block rather than the whole LAN because
-            # a blanket `ip ttl set 1` also breaks any customer running an
+            # Matched on IP, not MAC. This chain hooks postrouting, and at that
+            # point the outgoing Ethernet header does not exist yet, so an
+            # `ether daddr` test matches nothing and says so to nobody. That is
+            # how the first version of this rule shipped: the block set filled
+            # correctly, the audit log said "limiting", and the shared phone
+            # kept browsing. Counters settled it -- 0 packets on the MAC rule,
+            # 30 in twelve seconds on `ip daddr` for the same device. The app
+            # keeps the MAC set as the identity and resolves it to an IP from
+            # the DHCP lease when it enforces.
+            #
+            # Scoped to the block set rather than the whole LAN because a
+            # blanket `ip ttl set 1` also breaks any customer running an
             # on-device VPN, whose stack decrements once more internally: 1
             # becomes 0 and the packet is discarded before an app ever sees it.
+            #
+            # IPv4 only. The customer LAN carries no IPv6, and the old hoplimit
+            # rule was keyed the same dead way.
             anti = ("    chain mangle_post {\n"
                     "        type filter hook postrouting priority mangle; "
                     "policy accept;\n"
-                    "        oifname %s ether daddr @tether_block ip ttl set 1\n"
-                    "        oifname %s ether daddr @tether_block "
-                    "ip6 hoplimit set 1\n"
-                    "    }" % (lan_dev, lan_dev))
+                    "        oifname %s ip daddr @tether_block_ip ip ttl set 1\n"
+                    "    }" % lan_dev)
     flowt = offl = ""
     if cfg.get("flow_offload"):
         flowt = ("    flowtable ft {\n"

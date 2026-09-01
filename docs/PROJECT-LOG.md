@@ -601,6 +601,64 @@ Card #2 carries the corrected defaults (5/3 Mbit cap, tethering enforcement on)
 which master #1 does not. Admin password set to the owner's choice, stored
 PBKDF2, installer seed cleared from config.json.
 
+---
+
+## 2026-09-01 (night) - full audit of card #2, locked to Tailscale
+
+### Information leak closed
+
+`/admin` answered a refused customer with 403 and an explanation naming the
+config file and the setting to change -- a recovery procedure handed to whoever
+knocked, on top of confirming an admin panel existed. Now answered with the
+same 302 to the portal that any unknown URL gets. Verified from a real customer
+on 10.0.0.2: `/admin`, `/admin/login`, `/admin/diag` and `/admin/remote-access`
+are byte-identical to `/nope`, and nothing leaks in body or headers.
+
+The reason moves to the audit log with the source IP, which also makes probing
+visible -- repeated `admin_denied` from one address is somebody trying doors.
+
+`test_security` had asserted *"refusal explains the recovery path"*, an
+assertion that is exactly backwards once the point is not to explain. Updated
+rather than deleted.
+
+### Audit results
+
+```
+suites          11/11
+services        pisowifi/nftables/dnsmasq/tailscaled  all active, 0 restarts
+resources       132/991 MB, 19% disk, load 0.01, 41 C
+coin            armed via gpiod; 1 real sale of P1 -> 20 min, speed applied
+kernel conc.    50/50 enforced, 154 ms each, zero leftover
+http conc.      50 portal 246 ms | 100 polls 462 ms | 200 polls 3.2 s | 50 admin 302x50
+customer        portal 200, /admin 302, DNS ok, captive detect 302
+uplink          :22 and :8080 closed, ping dead
+tunnel          admin + SSH work; board is 100.84.129.18
+```
+
+### Reboot over the tunnel, with the uplink shut
+
+The test that matters after a power cut: with the uplink closed and admin
+Tailscale-only, the tunnel is the only way back. **Board returned in 48 s**,
+unattended, with LAN addressed, coin on gpiod, session and shaping intact,
+0 ordering cycles.
+
+### Three test artefacts that impersonated bugs today
+
+Worth more than the bugs, because each cost time and each looked real:
+
+1. `ping` counts ICMP *rejects* as replies, so an unpaid client "replied" while
+   a capture on the uplink showed zero ICMP escaping.
+2. `curl` without `--interface` on a dual-homed PC sources from the wrong NIC,
+   making a working captive-portal redirect look like HTTP 000.
+3. `grep -i failed` over a unit's journal matched `resolvconf: Failed to set DNS
+   configuration`, a cosmetic message from a *different* process, and made a
+   clean dnsmasq look like it had a boot race. `Result=success, NRestarts=0` is
+   the answer, not a log grep.
+
+The dnsmasq port-53 failure is real but install-time only: Debian's postinst
+starts it with the stock config before ours is rendered. It does not recur at
+boot and a cloned card never sees it.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

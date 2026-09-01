@@ -200,13 +200,23 @@ never with a blanket rule.
     FAILS   set ttl_norm { type ether_addr; flags timeout; timeout 10m; }
     WORKS   set ttl_norm { type ether_addr; flags dynamic, timeout; timeout 10m; }
 
-Without it nft rejects the **whole ruleset**, so the machine comes up with no
-firewall — no portal, no enforcement, everyone online free — rather than just
-losing the feature. Sets populated only from userspace (`nft add element`) do
-not need it.
+Without it nft rejects the **whole ruleset**, not just the offending line. Sets
+populated only from userspace (`nft add element`) do not need it.
 
-`detect.sh` now runs `nft -c` on the candidate before installing it and keeps
-the working ruleset if it fails, because that path runs at **every boot**.
+**What losing the ruleset actually costs** — worth being precise, because the
+obvious guess is wrong. `nftables.conf` is the only source of NAT
+(`oifname $WAN_IF masquerade`, no iptables fallback), so a ruleset that will not
+load does **not** mean "no firewall, everyone online free". It means no
+masquerade and no portal redirect: nobody reaches the internet and nobody
+reaches the portal. The machine is visibly dead rather than silently generous —
+better, but still dead.
+
+`detect.sh` therefore degrades feature by feature rather than all at once: it
+`nft -c`s the full render, retries with the optional tethering rules stripped,
+and only then falls back to the previous file. A fresh card has no previous
+file, so "refuse and keep the old one" alone would have left it with nothing.
+Verified: the stripped render is byte-identical to an `anti_tether: false`
+render, which is the ruleset already proven on hardware.
 
 ### 3f. Never write a `#@TOKEN@` in prose in the template
 

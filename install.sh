@@ -71,11 +71,16 @@ fi
 # WiFi-radio board, or have PPPoE switched on from the admin UI, without anyone
 # needing to SSH in and apt-get anything. cloud-guest-utils supplies growpart,
 # which first boot uses to grow a written card's rootfs to the card's real size.
+# python3-libgpiod is NOT optional. OPi.GPIO's add_event_detect() arms the
+# deprecated sysfs edge interface, which this kernel accepts and then never
+# fires, so coins are silently never counted. coinslot.py reads the line through
+# libgpiod instead, and falls back to polling only when it is absent -- a
+# fallback that works, but that nobody would notice had engaged.
 echo "==> Installing packages"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
     dnsmasq nftables python3-flask python3-pip iproute2 hostapd pppoe ppp \
-    cloud-guest-utils
+    cloud-guest-utils python3-libgpiod
 pip3 install --break-system-packages OPi.GPIO 2>/dev/null || pip3 install OPi.GPIO
 pip3 install --break-system-packages waitress 2>/dev/null || pip3 install waitress || {
     echo "  !! WARNING: waitress did NOT install."

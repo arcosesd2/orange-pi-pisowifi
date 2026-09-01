@@ -283,29 +283,48 @@ if os.path.exists(src):
          .replace("#@OFFLOAD@", offl).replace("#@WAN_MGMT@", wanmgmt) \
          .replace("#@ANTI_TETHER_FWD@", antifwd)
 
-    # Syntax-check the candidate before it replaces a ruleset that works.
+    # Syntax-check before installing, and fall back feature by feature.
     #
-    # This runs at every boot, so a template or toggle that renders invalid
-    # nft would otherwise install itself, nftables.service would fail, and the
-    # machine would come up with no firewall at all -- no captive portal, no
-    # session enforcement, everyone online for free. Keeping the previous file
-    # and shouting is strictly better than that, and it is the only guard on
-    # the boot path: the admin page's rerender() checks separately.
+    # This runs at every boot, and nftables.conf is the ONLY source of NAT --
+    # `oifname $WAN_IF masquerade` lives there and there is no iptables
+    # fallback. So a ruleset that will not load does not mean "no firewall,
+    # everyone free"; it means no masquerade, no portal redirect, and a machine
+    # that serves nobody. Visible rather than silent, but still dead.
+    #
+    # The optional features are the risky part, so they are dropped before the
+    # base ruleset is. A fresh card in particular has no previous
+    # /etc/nftables.conf to keep, so "refuse and keep the old one" would leave
+    # it with nothing at all.
     tmp = "/run/pisowifi/nftables.candidate"
-    write(tmp, s)
-    chk = subprocess.run(["nft", "-c", "-f", tmp],
-                         capture_output=True, text=True)
-    if chk.returncode != 0:
-        sys.stderr.write(
-            "pisowifi-detect: REFUSING to install an invalid nftables ruleset; "
-            "keeping the existing one.\n%s\n" % (chk.stderr or "").strip())
-        if not os.path.exists("/etc/nftables.conf"):
-            # Nothing to fall back to. Better to leave it absent and let
-            # nftables.service fail loudly than to write something unloadable.
-            sys.stderr.write("pisowifi-detect: and there is no previous "
-                             "ruleset to fall back to.\n")
-    else:
+
+    def loads(candidate):
+        write(tmp, candidate)
+        return subprocess.run(["nft", "-c", "-f", tmp],
+                              capture_output=True, text=True)
+
+    chk = loads(s)
+    if chk.returncode == 0:
         write("/etc/nftables.conf", s)
+    else:
+        sys.stderr.write(
+            "pisowifi-detect: rendered ruleset is INVALID:\n%s\n"
+            % (chk.stderr or "").strip())
+        # Retry without the optional extras, so an untested toggle can never
+        # take a machine off the air.
+        bare = (s.replace(antifwd, "").replace(anti, "")
+                if (antifwd or anti) else s)
+        chk2 = loads(bare) if bare != s else chk
+        if bare != s and chk2.returncode == 0:
+            sys.stderr.write(
+                "pisowifi-detect: installed WITHOUT tethering detection so the "
+                "machine still works. Fix the template, then re-enable it.\n")
+            write("/etc/nftables.conf", bare)
+        elif os.path.exists("/etc/nftables.conf"):
+            sys.stderr.write("pisowifi-detect: keeping the previous ruleset.\n")
+        else:
+            sys.stderr.write(
+                "pisowifi-detect: and there is no previous ruleset to fall "
+                "back to -- this machine will not pass traffic.\n")
     try:
         os.unlink(tmp)
     except OSError:

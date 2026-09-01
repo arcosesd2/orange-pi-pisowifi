@@ -17,7 +17,12 @@ param(
     [string]$User = "root",
     [switch]$Seal,
     [switch]$ZeroFill,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    # Installs the Tailscale package so a sealed card can be administered
+    # remotely. It is NOT enrolled here: enrolment uses a single-use auth key
+    # entered on the board's own admin page, so no reusable credential ends up
+    # in this script, in a backup, or on every cloned card.
+    [switch]$Tailscale
 )
 # NOT "Stop". Windows PowerShell turns anything a native command writes to
 # stderr into an ErrorRecord, so with Stop the script dies on ssh's own warning
@@ -167,7 +172,9 @@ Say "Running the installer (this pulls packages -- a few minutes)"
 # firewall seals this interface the moment nftables loads, and every check
 # below times out against a board that is actually fine. seal.sh turns it
 # back off, so it never reaches a master image.
-ssh $dest "cd /root/pisowifi && bash install.sh --yes --wan-management"
+$installFlags = "--yes --wan-management"
+if ($Tailscale) { $installFlags = "$installFlags --tailscale" }
+ssh $dest "cd /root/pisowifi && bash install.sh $installFlags"
 if ($LASTEXITCODE -ne 0) { throw "installer failed -- see the output above" }
 
 # ---------------------------------------------------------------------------

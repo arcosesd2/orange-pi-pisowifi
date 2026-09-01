@@ -809,9 +809,30 @@ a detached 150 s auto-rollback cancelled by touching a file once the next SSH
 got through. Cheap insurance for editing the firewall you are logged in
 through.
 
+### Proof, and a fifth test artefact
+
+The tethered phone browsed; detection fired at 574 forwarded packets; both
+sets filled (`10.0.0.100` in `tether_block_ip`). Then two `ip ttl 1 counter`
+rules appended AFTER the rewrite, five pings to each phone:
+
+    ip daddr @tether_block_ip ip ttl 1   -> 5 packets     (enforced phone)
+    ip daddr 10.0.0.109      ip ttl 1   -> 0 packets     (control)
+
+Owner: "my other unpaid phone that is tethering ... no longer browse the
+internet." Paid phone unaffected.
+
+Before that, two tcpdump captures on egress came back empty -- for the
+control as well, which is what gave it away. **tcpdump is not installed on
+this board.** Every blank capture this session, including the two earlier
+ones blamed on idle phones, was `command not found` hidden behind
+`2>/dev/null`. Never silence stderr on a diagnostic you have not confirmed
+exists; and on this board, nft counters are the packet tool.
+
 ### Open items
 
-- [ ] Owner to confirm the tethered phone has lost internet with the IP rule
-      live, and that one tap on the portal makes the next coin audible.
+- [ ] Owner to confirm one tap on the portal makes the next coin audible
+      (chip "Tap anywhere to turn on sound" should appear, then vanish).
 - [ ] Why the phone's own TTL is 63 with MACs preserved is not explained (not
       an L3 hop). Irrelevant to v3, which assumes nothing -- but worth a look.
+- [ ] Owner's laptop `74:d4:dd:39:35:0d` is still whitelisted; remove it under
+      Devices before testing the paid flow from it.

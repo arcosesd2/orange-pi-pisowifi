@@ -660,6 +660,13 @@ from that:
    survives a read-only remount, which is exactly when the evidence is lost.
 5. **Match the user's environment when validating** — PS 5.1 vs 7, the board's
    nft version vs the docs'.
+6. **Never `2>/dev/null` a diagnostic you have not confirmed exists.** Four
+   tcpdump captures in one session came back blank and were read as "the
+   phones were idle". tcpdump is not installed on this board; every one was
+   `command not found`, hidden. The tell was a *control* capture coming back
+   equally blank. Run `command -v tool` first, and prefer an `nft ... counter`
+   rule for packet questions here — it is always present and cannot lie about
+   whether it ran.
 
 ---
 
@@ -683,4 +690,6 @@ in a way that was not obvious beforehand:
 - Xunlong Orange Pi One, Armbian 26.8.1 trixie, kernel 6.18.44-current-sunxi, armv7l, 991 MB RAM
 - `end0` = uplink (onboard), `enx…` = customer LAN (USB dongle), hostapd off
 - Portal `10.0.0.1:8080`; SSH blocked from both interfaces unless whitelisted or `wan_management` is on
+- **No tcpdump.** Use nft `counter` rules (insert observe-only, read, delete by handle)
+- The shop AP delivers customer traffic with the phone's own TTL at **63** (MACs preserved); never assume 64
 - Deploy: `.\provision.ps1 -Target <ip>` from the worktree; `-Seal -ZeroFill` to build a master image

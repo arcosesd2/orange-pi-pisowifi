@@ -458,6 +458,91 @@ the shop's router network was one password guess from the login form.
 was created with, so changing the setting appears to do nothing until someone
 buys time again.
 
+---
+
+## 2026-09-01 (later) - pre-seal audit: three bugs, all fleet-wide
+
+Full audit before sealing. Everything below was found on a card that reported
+itself perfectly healthy.
+
+### 1. systemd ordering cycle (fixed, 9de9f4f)
+
+`pisowifi-detect` was `After=network-pre.target`; Debian's `nftables.service`
+is `Before=network-pre.target`; we are `Before=nftables.service`. systemd
+resolved the loop by **deleting a job**. It picked the harmless one here. It
+could equally drop `pisowifi-detect`, leaving nftables to load a stale config.
+
+### 2. systemd-networkd stealing the customer LAN (fixed, e946dd2)
+
+The serious one. Rebooted the card and it came back with every service active
+and **no customer LAN address**:
+
+```
+12:06:10  pisowifi-detect: provisioned          <- ip addr replace ran
+12:06:11  enx...: Link DOWN / Lost carrier
+12:06:11  Configuring with 10-netplan-all-eth-interfaces.network
+```
+
+Armbian's netplan matches `Name=e*` with DHCP=yes, which catches the customer
+dongle as well as the uplink. A race, so it would hit some boots and some cards
+and not others -- the worst way for a fleet to fail. detect.sh now writes
+`/etc/systemd/network/05-pisowifi-lan.network` each boot and lets networkd own
+the address.
+
+### 3. Reboot button would have looked broken (fixed, 1c9fa93)
+
+Rebooting inline kills waitress mid-response. Deferred through `systemd-run`.
+
+### Tested as a real customer, not a simulation
+
+The laptop's Ethernet is genuinely on 10.0.0.2, and a host route via 10.0.0.1
+made its traffic actually traverse the forward chain.
+
+| | paid | unpaid |
+|---|---|---|
+| internet 1.1.1.1:443 | CONNECTED, 27 ms, HTTPS 301 | BLOCKED |
+| portal / api/status  | 200 | 200 |
+| DNS via box          | works | works |
+| /admin               | 403 | 403 |
+
+The unpaid "ping replied" was **not** a leak: those were
+`Destination port unreachable` from the box's own reject, which Windows counts
+as received. A capture on the uplink saw zero ICMP escape. Worth remembering --
+it looks exactly like a leak in a test that only counts replies.
+
+### The tethering fix validated in the field
+
+The laptop sits in `ttl_fwd` only, never `ttl_norm` -- one consistent TTL below
+Windows' 128, because Norton VPN is installed. Classified `vpn_like`, **not
+blocked**, and browsing normally throughout. That is precisely the device v1
+cut off the internet.
+
+### Concurrency on real hardware
+
+- 50 simultaneous customers: 50/50 enforced in the kernel, 153 ms each, load
+  0.48, 754 MB free, **zero leftover state** after teardown.
+- 100 concurrent `/api/status` (the real pattern -- one poll per phone per
+  second): 452 ms, all 200.
+- `/admin` under 50-way load: 403 x 50. The gate does not soften under load.
+
+### Reboot from the admin page, end to end
+
+```
+12:54:12  admin login              (owner, over Tailscale)
+12:54:50  reboot requested from admin
+12:55:12  boot 0 begins
+```
+
+Came back with services up, LAN addressed, coin on gpiod, Tailscale running,
+admin still 403 from customers, session intact (2284 s, speed profile kept),
+and shaping self-healing to 5/3 Mbit once the client sent its first packet.
+
+### Note for next time
+
+Two test artefacts that looked like product bugs and were not: `ping` counting
+ICMP rejects as replies, and `curl` without `--interface` on a dual-homed PC
+sourcing from the wrong NIC. Bind the source when testing a customer path.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

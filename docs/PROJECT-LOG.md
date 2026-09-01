@@ -394,6 +394,54 @@ input still armed via gpiod, portal 200.
 egress half alone first — it breaks hotspot sharing on its own, because the
 tethered device's replies never come back, and it cannot cut anyone off.
 
+---
+
+## 2026-09-01 - second card, and the first fully clean bring-up
+
+New SD card, same board (`02:81:e4:42:af:48`, so the hostname came back as
+`pisowifi-42af48` -- the H3 derives its NIC MAC from the SoC serial and it
+survives reflashing). Found at 192.168.254.122.
+
+`provision.ps1 -Tailscale` ran end to end, exit 0, no manual intervention after
+the SSH key was in place. That is the first time this has happened.
+
+### The three prep fixes all earned their place
+
+- **gpiod, not polling.** `coin input armed on physical pin 3 (PA12) via gpiod`.
+  Without `python3-libgpiod` in the package list this card would have taken the
+  polling fallback and said so in one line nobody reads.
+- **Nothing degraded.** The tethering rules -- never syntax-checked anywhere,
+  because this PC has no `nft` and WSL2 cannot start -- loaded first time on
+  real nft 1.1.3. All three sets exist, so `flags dynamic` was right.
+- **Interface detection handled a swapped dongle.** The LAN adapter is a
+  different unit from the last board (`00:e0:4c:68:00:6f` vs `...68:06:a8`) and
+  was picked up correctly, which is exactly what the old MAC-pinned udev rule
+  could not do.
+
+### Verified with real money and real kernel state
+
+- Coin slot: 1 sale, **P5 -> 120 minutes**, matching the P5 = 2 h tier.
+- **Speed limiting proven on hardware for the first time**: `htb 1:2 rate 5Mbit`
+  with a CAKE leaf on the LAN, `rate 3Mbit` on ifb0. It had shipped as
+  `default_speed: unlimited` since v2.3, so every machine until now ran uncapped
+  despite the feature being complete.
+- Tethering: detection and per-device enforcement both live. `@tether_block` is
+  empty, so nothing is limited -- which is the point of scoping it per confirmed
+  device instead of blanket-dropping on TTL.
+
+### Tailscale enrolled without ever handling a credential
+
+`tailscale up` prints a login URL; the owner approved it in their own browser.
+No auth key generated, pasted, or stored. Board is `100.66.42.53` on
+`tail10036d.ts.net`. `/etc/resolv.conf` confirmed untouched -- `--accept-dns=false`
+matters, or MagicDNS would replace the resolver dnsmasq needs for the portal.
+
+### Note for next time
+
+`default_speed` applies to NEW sessions. An existing session keeps the speed it
+was created with, so changing the setting appears to do nothing until someone
+buys time again.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

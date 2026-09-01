@@ -684,7 +684,17 @@ def sysinfo():
 
 
 def _heartbeat_payload():
+    """What one machine tells the fleet dashboard about itself.
+
+    Earnings alone are not enough to run a fleet on. The failures that cost
+    money on this project were all silent while the takings looked normal for a
+    while: a card gone read-only recording nothing, a coin line that fell back
+    to polling, coins landing with no window open because the relay was not
+    gating the acceptor. Each of those is one field here, so a machine in
+    trouble is visible from a phone instead of from a site visit.
+    """
     now = time.time()
+    cash = _cash_summary()
     return {
         "device_id": setting("device_id") or socket.gethostname(),
         "name": setting("hotspot_name"),
@@ -692,6 +702,22 @@ def _heartbeat_payload():
         "sales": db.sales_summary(),
         "active_clients": len(db.active_sessions()),
         "sys": sysinfo(),
+        # --- health signals a fleet operator actually needs ---
+        "storage_ok": bool(storage_health.get("ok", True)),
+        "storage_reason": storage_health.get("reason"),
+        # "poll" here means libgpiod was missing and the coin line degraded to
+        # the fallback. It still counts coins, but nobody would notice.
+        "coin_backend": (slot.coin_input.name if getattr(slot, "coin_input", None)
+                         else ("mock" if slot.mock else None)),
+        "coin_mock": bool(slot.mock),
+        # A climbing figure means the relay is not gating the acceptor.
+        "coins_unclaimed": slot.unclaimed_total,
+        "coins_pending": slot.pending_pesos,
+        # Cash waiting to be collected, so a full box is visible remotely.
+        "box_expected": cash["expected"],
+        "box_coins": cash["coins"],
+        "box_last_variance": cash["last_variance"],
+        "clock_warning": clock_warning,
     }
 
 

@@ -65,8 +65,9 @@
         <div><label for="jt">Job</label>
           <select id="jt" name="type">
             <option value="reboot">Reboot the board</option>
-            <option value="backup">Write a config backup</option>
-            <option value="set_rate">Change minutes per ₱1</option>
+            <option value="backup">Write a config backup (stays on this card)</option>
+            <option value="backup_offsite">Send a backup to another machine</option>
+            <option value="set_rate">Change minutes per ₱1 (happy hour)</option>
             <option value="blocklist_refresh">Refresh DNS blocklist</option>
             <option value="report">Send remote report</option>
           </select></div>
@@ -75,6 +76,16 @@
         <div><label for="jval">Value <span style="font-weight:400">(rate change only)</span></label>
           <input id="jval" name="value" type="number" min="1" placeholder="20"></div>
       </div>
+      <p class="hint">
+        <b>Happy hour</b> takes two <code>set_rate</code> jobs, not one: one to
+        raise the rate when it starts and one to put it back when it ends. A
+        single job changes the rate permanently, which is the mistake to avoid
+        &mdash; you would find out weeks later from the takings.<br>
+        Example: <code>set_rate 30</code> at 09:00 and <code>set_rate 20</code>
+        at 12:00 gives cheaper mid-mornings and normal pricing after.<br>
+        <b>Send a backup to another machine</b> needs a target set first, in
+        <a href="/admin/remote-access">Remote access</a>.
+      </p>
       <label>Days <span style="font-weight:400">(none ticked = every day)</span></label>
       <div class="days">
         {% for d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}

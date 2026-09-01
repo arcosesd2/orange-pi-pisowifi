@@ -543,6 +543,64 @@ Two test artefacts that looked like product bugs and were not: `ping` counting
 ICMP rejects as replies, and `curl` without `--interface` on a dual-homed PC
 sourcing from the wrong NIC. Bind the source when testing a customer path.
 
+---
+
+## 2026-09-01 (evening) - card #2, and remote management proven
+
+Reflashed after imaging master #1. `setup.ps1` built the card, then everything
+below was done over Tailscale from the laptop.
+
+### setup.ps1 had a real bug, and my first diagnosis of it was wrong
+
+It splatted an **array** into provision.ps1. Array splatting binds
+POSITIONALLY, so the literal string "-Target" went to the first positional
+parameter and the IP to the second, and every `[switch]` was silently dropped:
+
+```
+ARRAY      Target = '-Target'          User = '192.168.254.122'  Tailscale = False
+HASHTABLE  Target = '192.168.254.122'  User = 'root'             Tailscale = True
+```
+
+It surfaced as *"Could not install the SSH key -- check the IP and the root
+password"*, which points at the network and the password, neither of which was
+wrong. I first blamed the variable being named `$args`; renaming it changed
+nothing and the same failure recurred. `$args` is still a bad name -- it is an
+automatic variable -- but it was not the cause. Both are now SKILL.md 1f.
+
+### Option A applied and verified: laptop + Tailscale only
+
+Enrolled with the login-URL flow again, so no auth key was ever generated,
+pasted or stored. Board is `100.84.129.18`; `/etc/resolv.conf` confirmed
+untouched.
+
+The gate before closing anything was **both** paths proven from the laptop over
+the tunnel: SSH (peer IP 100.108.32.39, i.e. scarlite, not the LAN) and the
+admin page. Only then were `wan_management`, `wan_ssh` and `wan_admin` all set
+false with `admin_lan_access: tailscale` -- applied **through the tunnel**, so
+the connection doing the work was the one that had to survive.
+
+```
+1. UPLINK CLOSED   :22 closed   :8080 closed   ping no reply
+2. TAILSCALE WORKS :22 open     :8080 open     /admin 302 -> login 200
+3. CUSTOMERS FINE  portal 200   /admin 403     captive detect 302
+```
+
+Check the `iifname "tailscale0" accept` rule is in the **template** and not just
+the live ruleset before doing this. The re-render rebuilds from the template; a
+rule that exists only in memory disappears at exactly the wrong moment.
+
+### Remote management confirmed
+
+12/12 deployed modules md5-match the repo, compared entirely over the tunnel.
+Config edits, firewall re-render, service restarts and file verification all
+work from the laptop with no path to the board on any physical network.
+
+### State
+
+Card #2 carries the corrected defaults (5/3 Mbit cap, tethering enforcement on)
+which master #1 does not. Admin password set to the owner's choice, stored
+PBKDF2, installer seed cleared from config.json.
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

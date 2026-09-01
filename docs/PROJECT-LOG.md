@@ -436,6 +436,22 @@ No auth key generated, pasted, or stored. Board is `100.66.42.53` on
 `tail10036d.ts.net`. `/etc/resolv.conf` confirmed untouched -- `--accept-dns=false`
 matters, or MagicDNS would replace the resolver dnsmasq needs for the portal.
 
+### Admin locked to Tailscale, verified from every side
+
+`admin_lan_access: tailscale`. Tested from a real customer device (the laptop's
+Ethernet on 10.0.0.2, which is genuinely on the customer LAN, not a simulation):
+
+```
+customer 10.0.0.2      /admin 403   /  200   /api/status 200
+uplink   192.168.254.x /admin 403
+tailscale 100.66.42.53 /admin 302 -> login
+loopback 127.0.0.1     /admin 302 -> login
+```
+
+Owner confirmed the tunnel path works from their phone before this was trusted.
+Note it blocks the **uplink** too, not just customers -- previously anyone on
+the shop's router network was one password guess from the login form.
+
 ### Note for next time
 
 `default_speed` applies to NEW sessions. An existing session keeps the speed it

@@ -259,24 +259,42 @@ if os.path.exists(src):
                  "        devices = { %s, %s }\n"
                  "    }" % (lan_dev, wan))
         offl = "        ip protocol { tcp, udp } flow add @ft"
-    # Two separate doors on the uplink, because they have different lifetimes.
+    # Three doors on the uplink, mutually exclusive, most-open first. They exist
+    # separately because they have different lifetimes and different blast
+    # radii, and collapsing them means opening more than the job needs.
     #
-    # wan_management is the bench bring-up escape hatch: SSH + portal + ping.
-    # Without it the uplink is sealed the instant the installer finishes, so
-    # nothing can verify the machine it just built. seal.sh forces it off.
+    # wan_management -- SSH + portal + ping. The bench bring-up escape hatch:
+    #   without it the uplink is sealed the instant the installer finishes and
+    #   nothing can verify the machine it just built. seal.sh forces it off, so
+    #   it never reaches a deployed card.
     #
-    # wan_admin is a production setting: the admin page only, no SSH. It exists
-    # because "admin must not be reachable from the customer network" leaves
-    # the uplink as the only way in -- this board has two ports, and Wi-Fi
-    # clients and anything cabled into the AP share the customer one. Pairing
-    # admin_lan_access=off with wan_management=off (which sealing does) would
-    # otherwise leave admin reachable from nowhere at all.
+    # wan_ssh -- SSH + ping, and NOT the portal. For an owner who administers
+    #   over Tailscale but wants one trusted machine able to shell in over the
+    #   wire as well: a laptop with the key gets in, while the admin page stays
+    #   off every physical network. wan_management would also have exposed the
+    #   portal to whatever the uplink is plugged into, which on a deployed
+    #   machine is the shop's router and everything on it.
+    #
+    # wan_admin -- the admin page only, no SSH. For an owner who administers
+    #   from the uplink network rather than over a tunnel. Pairing
+    #   admin_lan_access=off with wan_management=off (which sealing does) would
+    #   otherwise leave admin reachable from nowhere at all.
+    #
+    # Note what none of these can do: restrict by source address. The owner's
+    # laptop is on DHCP and its address moves, so pinning a rule to it would
+    # break silently the next time the router hands out a different one. The
+    # control that actually holds is key-only SSH -- reaching the port is not
+    # the same as getting in.
     port = int(cfg.get("portal_port") or 8080)
     wanmgmt = ""
     if cfg.get("wan_management"):
         wanmgmt = ("        iifname %s tcp dport { 22, %d } accept\n"
                    "        iifname %s icmp type echo-request accept"
                    % (wan, port, wan))
+    elif cfg.get("wan_ssh"):
+        wanmgmt = ("        iifname %s tcp dport 22 accept\n"
+                   "        iifname %s icmp type echo-request accept"
+                   % (wan, wan))
     elif cfg.get("wan_admin"):
         wanmgmt = "        iifname %s tcp dport %d accept" % (wan, port)
     s = s.replace("#@ANTI_TETHER@", anti).replace("#@FLOWTABLE@", flowt) \

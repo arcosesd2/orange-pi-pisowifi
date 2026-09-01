@@ -43,6 +43,17 @@ def render():
     return s
 
 
+def render_with(wan_mgmt):
+    """Render with one of the uplink doors filled in, everything else blank."""
+    s = open(CONF, encoding="utf-8").read()
+    s = s.replace("eth0", WAN).replace("wlan0", LAN).replace("10.0.0.0/24", NET)
+    s = re.sub(r"^(define GW_IP\s*=\s*).*$", r"\g<1>" + GW, s, count=1, flags=re.M)
+    s = s.replace("#@WAN_MGMT@", wan_mgmt)
+    for token in TOKENS:
+        s = s.replace(token, "")
+    return s
+
+
 TOKENS = ("#@ANTI_TETHER@", "#@ANTI_TETHER_FWD@", "#@FLOWTABLE@",
           "#@OFFLOAD@", "#@WAN_MGMT@")
 
@@ -296,6 +307,22 @@ def main():
                dport=22, mac_in=set(), ctstate="new")
     act, _ = verdict(chain(text, "input"), p)
     check("wan         tcp/22 inbound (wan_management off)", str(act), "drop")
+
+    print("\n=== wan_ssh opens SSH on the uplink WITHOUT the portal ===")
+    # The whole point of this mode: a trusted laptop can shell in over the
+    # wire, while the admin page stays off every physical network. If it ever
+    # starts letting the portal through, an owner who chose it for SSH quietly
+    # gets the login form exposed to the shop's router network as well.
+    ssh_door = ('        iifname %s tcp dport 22 accept\n'
+                '        iifname %s icmp type echo-request accept' % (WAN, WAN))
+    with_ssh = render_with(ssh_door)
+    for dport, want, why in ((SSH_PORT, "accept", "SSH is the point"),
+                             (PORTAL, "drop", "portal must NOT be exposed"),
+                             (80, "drop", "nor plain http")):
+        p = Packet(iif=WAN, saddr="192.168.1.5", daddr="192.168.1.9",
+                   proto="tcp", dport=dport, mac_in=set(), ctstate="new")
+        act, _ = verdict(chain(with_ssh, "input"), p)
+        check("wan_ssh     tcp/%-5d inbound (%s)" % (dport, why), str(act), want)
 
     print("\n=== Tailscale is an owner path, and only for the owner ===")
     # Once a card is sealed, SSH is closed on both interfaces and customers

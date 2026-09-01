@@ -63,6 +63,8 @@ DEFAULTS = {
     # Admin page (no SSH) on the uplink port. Survives sealing, unlike
     # wan_management -- needed when admin_lan_access is "off", or admin
     # would be reachable from nowhere at all.
+    # SSH + ping on the uplink, without exposing the portal there.
+    "wan_ssh": False,
     "wan_admin": False,
     # Default topology: eth0 = internet uplink (onboard), eth1 = antenna/LAN
     # (USB-ethernet). Set lan_if to wlan0 only for the Pi-broadcasts-its-own-WiFi

@@ -7,6 +7,8 @@
   "_comment_admin_lan_access": "Who may open /admin. whitelist (default) = customers refused once any device is whitelisted; off = customer network never, uplink port yes; tailscale = ONLY over the Tailscale tunnel, no physical network at all; any = no restriction, the recovery setting. The customer portal is never gated by this. seal.sh resets it, because a Tailscale-only card cannot be set up before Tailscale is enrolled.",
   "admin_lan_access": "whitelist",
   "wan_management": false,
+  "_comment_wan_ssh": "true opens SSH (and ping) on the uplink port but NOT the portal -- for an owner who administers over Tailscale yet wants one trusted machine able to shell in over the wire. Key-only SSH is what actually restricts who gets in; the firewall cannot pin to a laptop whose DHCP address moves. seal.sh does not clear this, so decide before imaging.",
+  "wan_ssh": false,
   "_comment_wan_admin": "true serves the ADMIN PAGE ONLY (no SSH) on the uplink port, and survives seal.sh. Required when admin_lan_access is off, otherwise sealing leaves admin unreachable.",
   "wan_admin": false,
   "lan_if": "eth1",

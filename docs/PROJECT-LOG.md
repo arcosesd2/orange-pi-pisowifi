@@ -659,6 +659,61 @@ The dnsmasq port-53 failure is real but install-time only: Debian's postinst
 starts it with the stock config before ours is rendered. It does not recur at
 boot and a cloned card never sees it.
 
+---
+
+## 2026-09-01 (late) - six features, built against failures this project has had
+
+Each exists because of something that actually went wrong here, not because it
+seemed like a good idea.
+
+**Coin-box reconciliation.** The database knew what it credited; nothing
+compared that to the box, so a coin lost between the acceptor and the owner's
+hand left no trace. `collections` records each emptying with expected, counted
+and the difference. One short count is a miscount; a pattern is a problem.
+
+**Storage health** (`app/health.py`). The worst incident this project has had
+was a rootfs going read-only, undetected. In a shop that is silent and
+expensive: the portal serves, coins count, customers get online, and nothing is
+written down. The check writes, fsyncs and deletes a probe file rather than
+asking `os.access`, which returns True on a filesystem that went read-only
+underneath. When it fails, `/api/insert` returns 503 and the portal disables
+the button -- taking cash you cannot record is worse than turning the customer
+away.
+
+**Offsite backup over Taildrop.** A backup on the same card as the database
+protects against almost nothing, since the card is the most likely thing to
+fail and takes both copies. Taildrop rather than scp: no keys to distribute
+between machines. Offsite copies exclude secrets, because this copy leaves the
+machine.
+
+**Fleet heartbeat enriched.** The collector already existed (server/app.py);
+the heartbeat carried only earnings and uptime. Now it carries storage_ok,
+coin_backend (so a machine degraded to polling is visible), unclaimed coins,
+box total and last variance. Earnings alone are not enough to run a fleet on --
+every silent failure here looked plausible in the takings for a while.
+
+**Auto-block admin probers.** Denials were already audited; now N inside a
+window blocks that MAC. Keyed on MAC because a customer can take a new DHCP
+address in seconds. Whitelisted devices are exempt, and tested to be -- an
+owner locking themselves out is exactly the own-goal this kind of feature
+invites.
+
+**Happy hour.** `set_rate` existed but was never offered in the UI. The page
+now says it needs TWO jobs, one to change the rate and one to change it back; a
+single job changes the rate permanently and you find out weeks later from the
+takings.
+
+Deployed over Tailscale, 8/8 files md5-verified, 12/12 suites, service clean,
+collections table created, storage check reports writable, portal 200.
+
+### A fourth test artefact
+
+Importing `main` in a second process to inspect the heartbeat made the coin
+line report `mock`: the second process tried to claim a GPIO the running
+service already held, fell back to polling, then to mock. The service was on
+gpiod throughout. **Inspect a running service through its own logs or API,
+never by importing its module again.**
+
 ### Open items
 
 - [ ] Redeploy `47d357f` (portal-after-paying fix) — board was off the network.

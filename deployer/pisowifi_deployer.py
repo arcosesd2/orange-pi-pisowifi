@@ -470,7 +470,19 @@ def launch_gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
 
-    BG = "#0f172a"; CARD = "#1e293b"; ACCENT = "#fbbf24"; TXT = "#e2e8f0"
+    # Beach theme, the same palette as the portal and admin: sea blues sampled
+    # from the resort photo, sunset accents from the logo. The deployer is the
+    # first thing an owner opens and the admin is what they use afterwards --
+    # they should not look like two different products.
+    BG = "#062033"      # deep sea
+    CARD = "#0c3550"    # card / field
+    CARD_HI = "#10425f"  # hover
+    LINE = "#1a5a7d"
+    ACCENT = "#ffc233"  # sunset yellow
+    ACCENT_HI = "#ffb020"
+    TXT = "#eaf6ff"
+    MUTED = "#9fc6dd"
+    FIELD = "#082a41"
 
     root = tk.Tk()
     root.title(f"{APP_TITLE} {APP_VERSION}")
@@ -491,16 +503,18 @@ def launch_gui():
     style.configure("TLabel", background=BG, foreground=TXT)
     style.configure("Card.TLabel", background=CARD, foreground=TXT)
     style.configure("TButton", background=CARD, foreground=TXT, padding=6)
-    style.map("TButton", background=[("active", "#334155")])
+    style.map("TButton", background=[("active", CARD_HI)])
     style.configure("Accent.TButton", background=ACCENT, foreground="#111111")
-    style.map("Accent.TButton", background=[("active", "#f59e0b")])
-    style.configure("Danger.TButton", background="#dc2626", foreground="white")
-    style.map("Danger.TButton", background=[("active", "#b91c1c")])
+    style.map("Accent.TButton", background=[("active", ACCENT_HI)])
+    style.configure("Danger.TButton", background="#c2410c", foreground="white")
+    style.map("Danger.TButton", background=[("active", "#9a3412")])
     style.configure("Treeview", background=CARD, fieldbackground=CARD, foreground=TXT,
                     rowheight=24)
-    style.configure("Treeview.Heading", background="#334155", foreground=TXT)
-    style.configure("TEntry", fieldbackground="#0b1220", foreground=TXT)
-    style.configure("Horizontal.TProgressbar", background=ACCENT)
+    style.configure("Treeview.Heading", background=LINE, foreground=TXT)
+    style.configure("TEntry", fieldbackground=FIELD, foreground=TXT,
+                bordercolor=LINE, insertcolor=TXT)
+    style.configure("Horizontal.TProgressbar", background=ACCENT,
+                troughcolor=FIELD, bordercolor=LINE)
 
     msg_q = queue.Queue()
 
@@ -520,7 +534,7 @@ def launch_gui():
     logframe = ttk.Frame(root)
     logframe.pack(fill="both", expand=False, padx=10, pady=(0, 6))
     ttk.Label(logframe, text="Log").pack(anchor="w")
-    logbox = tk.Text(logframe, height=11, bg="#0b1220", fg="#cbd5e1",
+    logbox = tk.Text(logframe, height=11, bg=FIELD, fg=MUTED,
                      insertbackground=TXT, relief="flat", wrap="none",
                      font=("Consolas", 9))
     logbox.pack(fill="both", expand=True)

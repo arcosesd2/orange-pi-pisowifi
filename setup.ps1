@@ -209,10 +209,15 @@ Ok "key auth works -- $(if ($model) { $model } else { 'model unknown' })"
 # 3. Hand over to the installer
 # ---------------------------------------------------------------------------
 Step "Installing (this pulls packages -- several minutes)"
-$args = @("-Target", $Target, "-User", $User)
-if ($Tailscale) { $args += "-Tailscale" }
-if ($SkipTests) { $args += "-SkipTests" }
-& (Join-Path $src "provision.ps1") @args
+# NOT $args. That is a PowerShell automatic variable holding the script's own
+# unbound arguments, and assigning to it then splatting @args scrambles the
+# binding: provision.ps1 received -User "192.168.254.122" and -Target "-Target",
+# and tried to ssh to "192.168.254.122@-Target". It fails in a way that reads
+# like a network or password problem, which is what makes it worth naming.
+$provisionArgs = @("-Target", $Target, "-User", $User)
+if ($Tailscale) { $provisionArgs += "-Tailscale" }
+if ($SkipTests) { $provisionArgs += "-SkipTests" }
+& (Join-Path $src "provision.ps1") @provisionArgs
 if ($LASTEXITCODE -ne 0) {
     Bad "provision.ps1 failed -- see the output above. Nothing was sealed."
     exit 1

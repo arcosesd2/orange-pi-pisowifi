@@ -158,6 +158,10 @@ rm -f /etc/udev/rules.d/70-pisowifi-lan.rules
 rm -f /etc/udev/rules.d/70-persistent-net.rules
 rm -f /etc/nftables.conf /etc/dnsmasq.d/pisowifi.conf /etc/hostapd/hostapd.conf
 rm -f /etc/NetworkManager/conf.d/99-pisowifi.conf
+# Names one specific LAN device. detect.sh rewrites it every boot, so a stale
+# one self-heals -- but a master image should not carry another board's
+# interface name at all.
+rm -f /etc/systemd/network/05-pisowifi-lan.network
 rm -f /var/lib/misc/dnsmasq.leases /var/lib/dhcp/*.leases 2>/dev/null || true
 rm -f /etc/NetworkManager/system-connections/* 2>/dev/null || true
 rm -f /run/pisowifi/env /run/pisowifi/hostapd.needed 2>/dev/null || true

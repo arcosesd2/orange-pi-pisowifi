@@ -90,7 +90,46 @@ $remote = ssh $dest 'md5sum /opt/pisowifi/*.py'
 # compare against Get-FileHash -Algorithm MD5 locally; fail loudly on mismatch
 ```
 
-### 1f. Heredocs in the Bash tool eat backslashes
+### 1f. Splat a HASHTABLE, never an array
+
+**Fails:** passing arguments between `.ps1` scripts with an array.
+
+    FAILS   $a = @("-Target", $ip, "-User", "root", "-Tailscale")
+            & .\provision.ps1 @a
+    WORKS   $a = @{ Target = $ip; User = "root" }
+            $a["Tailscale"] = $true
+            & .\provision.ps1 @a
+
+Array splatting passes elements **positionally**. Proven side by side:
+
+```
+ARRAY      Target = '-Target'          User = '192.168.254.122'   Tailscale = False
+HASHTABLE  Target = '192.168.254.122'  User = 'root'              Tailscale = True
+```
+
+So the literal string `-Target` binds to the first positional parameter, the
+value lands in the second, and every `[switch]` is **silently dropped** -- the
+`-Tailscale` above never arrived. The visible symptom was an ssh to
+`192.168.254.122@-Target`, reported as *"Could not install the SSH key -- check
+the IP and the root password"*, which sends you to look at the network and the
+password, neither of which is wrong.
+
+Also do not name the variable `$args`: that is an automatic variable holding
+the script's own unbound arguments. Renaming it does **not** fix the array
+problem though -- that was a wrong first diagnosis here, and the rename alone
+changed nothing.
+
+### 1g. PowerShell 5.1 has no `&&`
+
+    FAILS   xz -t "file" && echo OK        # 5.1: "not a valid statement separator"
+    WORKS   xz -t "file"; if ($LASTEXITCODE -eq 0) { "OK" }
+
+`pwsh` (7+) supports `&&`, Windows PowerShell 5.1 does not, so a command that
+works in one terminal fails in the other. Bash paths (`/c/Users/...`) do not
+work in PowerShell either, and Git's tools are not on its PATH -- `xz` lives in
+`C:\Program Files\Git\mingw64\bin`. **Say which shell a command is for.**
+
+### 1h. Heredocs in the Bash tool eat backslashes
 
 Writing a Python script via `python - <<'PY'` loses `\\n` / `\\r`. Use the
 Write or Edit tool for any content containing backslashes.

@@ -209,14 +209,19 @@ Ok "key auth works -- $(if ($model) { $model } else { 'model unknown' })"
 # 3. Hand over to the installer
 # ---------------------------------------------------------------------------
 Step "Installing (this pulls packages -- several minutes)"
-# NOT $args. That is a PowerShell automatic variable holding the script's own
-# unbound arguments, and assigning to it then splatting @args scrambles the
-# binding: provision.ps1 received -User "192.168.254.122" and -Target "-Target",
-# and tried to ssh to "192.168.254.122@-Target". It fails in a way that reads
-# like a network or password problem, which is what makes it worth naming.
-$provisionArgs = @("-Target", $Target, "-User", $User)
-if ($Tailscale) { $provisionArgs += "-Tailscale" }
-if ($SkipTests) { $provisionArgs += "-SkipTests" }
+# A HASHTABLE, not an array. Splatting an array passes its elements
+# POSITIONALLY, so @("-Target", $Target, ...) bound the literal string
+# "-Target" to provision.ps1's first positional parameter ($Target) and the IP
+# to its second ($User). The result was an ssh to "192.168.254.122@-Target",
+# reported as "Could not install the SSH key -- check the IP and the root
+# password" -- which sends you looking at the network and the password, neither
+# of which is wrong. Hashtable splatting is what binds by name.
+#
+# Also worth avoiding the name $args here: it is an automatic variable holding
+# this script's own unbound arguments.
+$provisionArgs = @{ Target = $Target; User = $User }
+if ($Tailscale) { $provisionArgs["Tailscale"] = $true }
+if ($SkipTests) { $provisionArgs["SkipTests"] = $true }
 & (Join-Path $src "provision.ps1") @provisionArgs
 if ($LASTEXITCODE -ne 0) {
     Bad "provision.ps1 failed -- see the output above. Nothing was sealed."

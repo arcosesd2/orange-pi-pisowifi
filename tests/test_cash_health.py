@@ -84,6 +84,51 @@ main.storage_health = {"ok": True, "reason": None, "readonly": False,
 body = c.get("/api/status", environ_base=env).get_json()
 check("and clears once storage recovers", body.get("out_of_service"), False)
 
+print("\n=== a persistent admin prober gets blocked ===")
+# One denial is curiosity. A stream from one device is somebody trying doors.
+blocked = []
+main.firewall.block_add = lambda m: blocked.append(m) or True
+main.firewall.revoke = lambda m: True
+main.db.set_setting("admin_probe_block_after", 3)
+main.db.set_setting("admin_probe_window_s", 60)
+main.db.set_setting("admin_lan_access", "tailscale")
+main.tailscale.status = lambda: {"installed": True, "running": True,
+                                 "ip4": "100.101.102.103"}
+
+PROBER = "aa:bb:cc:dd:ee:aa"
+main.client_mac = lambda: PROBER
+main._probe_hits.clear()
+for i in range(3):
+    with main.app.test_request_context("/admin", environ_base={"REMOTE_ADDR": "10.0.0.77"}):
+        main._admin_guard()
+check("blocked after the 3rd denied request", blocked, [PROBER])
+check("...and recorded in the device list",
+      any(d["mac"] == PROBER and d["kind"] == "block"
+          for d in main.db.list_devices()), True)
+
+print("\n=== but never the owner's own whitelisted device ===")
+# An owner fumbling their password must not lock themselves out of their own
+# machine, which is exactly the sort of own-goal this kind of feature causes.
+OWNER = "aa:bb:cc:dd:ee:bb"
+main.db.set_device(OWNER, "white", label="owner phone")
+main.client_mac = lambda: OWNER
+blocked.clear()
+main._probe_hits.clear()
+for i in range(6):
+    with main.app.test_request_context("/admin", environ_base={"REMOTE_ADDR": "10.0.0.78"}):
+        main._admin_guard()
+check("whitelisted device is never auto-blocked", blocked, [])
+
+print("\n=== and the feature can be switched off ===")
+main.db.set_setting("admin_probe_block_after", 0)
+main.client_mac = lambda: "aa:bb:cc:dd:ee:cc"
+blocked.clear()
+main._probe_hits.clear()
+for i in range(8):
+    with main.app.test_request_context("/admin", environ_base={"REMOTE_ADDR": "10.0.0.79"}):
+        main._admin_guard()
+check("no blocking when set to 0", blocked, [])
+
 print()
 if fails:
     print("%d CASH/HEALTH FAILURE(S):" % len(fails))

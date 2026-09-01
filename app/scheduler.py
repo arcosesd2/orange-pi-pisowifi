@@ -62,6 +62,36 @@ class Scheduler(threading.Thread):
             subprocess.run(["reboot"])
         elif t == "set_rate":
             self.db.set_setting("minutes_per_peso", int(job.get("value", 20)))
+        elif t == "backup_offsite":
+            # A backup that lives on the same SD card as the database protects
+            # against almost nothing: the card is the single most likely thing
+            # to fail, and it takes both copies with it. This pushes a copy to
+            # another machine on the tailnet.
+            #
+            # Taildrop rather than scp: no SSH keys to distribute, no accounts
+            # to keep in step, and it works between any two devices the owner
+            # already has on the tailnet. The receiving machine collects it
+            # with `tailscale file get`.
+            peer = (self.db.get_setting("backup_peer") or "").strip()
+            if not peer:
+                raise RuntimeError(
+                    "backup_offsite scheduled but no backup_peer is set "
+                    "(Admin -> Remote access)")
+            d = os.path.join(os.path.dirname(self.db.path) or ".", "backups")
+            os.makedirs(d, exist_ok=True)
+            fn = os.path.join(d, time.strftime("offsite-%Y%m%d-%H%M.json"))
+            with open(fn, "w") as f:
+                # Secrets are excluded: this copy leaves the machine, and a
+                # backup carrying the admin hash and remote key is a different
+                # risk from one that never moves.
+                json.dump(self.db.export_config(include_sales=True,
+                                                include_secrets=False), f)
+            r = subprocess.run(["tailscale", "file", "cp", fn, peer + ":"],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                raise RuntimeError("taildrop to %s failed: %s"
+                                   % (peer, (r.stderr or r.stdout).strip()))
+            self.log.info("offsite backup sent to %s", peer)
         elif t == "backup":
             d = os.path.join(os.path.dirname(self.db.path) or ".", "backups")
             os.makedirs(d, exist_ok=True)

@@ -76,6 +76,35 @@
 </section>
 
 <section class="card">
+  <h2>Offsite backup</h2>
+  <p class="muted">
+    A backup stored on this machine's own SD card protects against almost
+    nothing &mdash; the card is the single most likely thing to fail, and it
+    takes both copies with it. Name another machine on your tailnet and the
+    scheduled <code>backup_offsite</code> job sends a copy there.
+  </p>
+
+  <form method="post" action="/admin/backup-peer">
+    <label for="peer">Send backups to (Tailscale machine name)</label>
+    <input id="peer" name="backup_peer" value="{{ backup_peer }}"
+           placeholder="e.g. scarlite" autocomplete="off">
+    <p class="muted">
+      Sent with Taildrop, so there are no SSH keys to distribute. Collect them
+      on that machine with <code>tailscale file get</code> &mdash; on Windows
+      the Tailscale app saves them for you. Offsite copies <b>exclude
+      secrets</b>: the admin hash and remote key stay on the machine, because
+      this copy leaves it.
+    </p>
+    <button class="btn primary">Save</button>
+  </form>
+
+  <p class="hint">
+    Then add a <code>backup_offsite</code> job under <b>Schedule</b> &mdash;
+    nightly, at a quiet hour.
+  </p>
+</section>
+
+<section class="card">
   <h2>Who may open admin</h2>
   <p class="muted">
     This gates <code>/admin</code> only. The customer portal stays reachable on

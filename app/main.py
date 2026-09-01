@@ -65,6 +65,11 @@ DEFAULTS = {
     # wan_management -- needed when admin_lan_access is "off", or admin
     # would be reachable from nowhere at all.
     # SSH + ping on the uplink, without exposing the portal there.
+    # Block a device after this many denied /admin requests inside the window.
+    # 0 disables it. Whitelisted devices are never blocked by this.
+    "admin_probe_block_after": 5,
+    "admin_probe_window_s": 60,
+    "backup_peer": "",
     "wan_ssh": False,
     "wan_admin": False,
     # Default topology: eth0 = internet uplink (onboard), eth1 = antenna/LAN
@@ -385,12 +390,58 @@ def _admin_guard():
         # can see it and a customer cannot.
         _audit("admin_denied",
                "%s (%s)" % (request.path, denied.split("\n")[0]))
+        _note_admin_probe()
         return redirect(f"http://{CFG['gateway_ip']}:{CFG['portal_port']}/", 302)
     # A machine still on the shipped password can do nothing but change it.
     if (admin_ok() and db.admin_password_is_default()
             and request.path not in ("/admin/setup", "/admin/logout")):
         return redirect("/admin/setup")
     return None
+
+
+# ---------- automatic blocking of admin probers ----------
+# One denied request is a customer who typed /admin out of curiosity. A stream
+# of them from the same device is somebody trying doors, and the audit log
+# already records every one -- turning that record into an action costs almost
+# nothing.
+#
+# Keyed on MAC, not IP: a customer can pick up a new DHCP address in seconds,
+# and the firewall enforces on MAC anyway. Whitelisted devices are exempt, so
+# an owner fumbling their own password is never locked out by this.
+_probe_hits = {}
+_probe_lock = threading.Lock()
+
+
+def _note_admin_probe():
+    """Count denied /admin requests per device, and block a persistent one."""
+    limit = int(setting("admin_probe_block_after") or 0)
+    if limit <= 0:
+        return                                  # feature switched off
+    mac = client_mac()
+    if not mac or db.is_whitelisted(mac):
+        return
+    window = float(setting("admin_probe_window_s") or 60)
+    now = time.monotonic()
+    with _probe_lock:
+        hits = [t for t in _probe_hits.get(mac, ()) if now - t < window]
+        hits.append(now)
+        _probe_hits[mac] = hits
+        count = len(hits)
+        if count < limit:
+            return
+        _probe_hits.pop(mac, None)              # blocked; stop counting it
+    try:
+        db.set_device(mac, "block",
+                      label="auto: probed admin %d times" % count)
+        firewall.block_add(mac)
+        firewall.revoke(mac)
+        db.log_audit("admin_probe_blocked",
+                     "%s after %d denied attempts in %.0fs"
+                     % (mac, count, window))
+        app.logger.warning("blocked %s: %d denied admin requests in %.0fs",
+                           mac, count, window)
+    except Exception as e:                                   # pragma: no cover
+        app.logger.warning("could not block prober %s: %s", mac, e)
 
 
 # ---------- settings: DB overrides config.json defaults ----------
@@ -1445,6 +1496,7 @@ def _remote_page(msg=None, error=None):
         enforce=bool(setting("anti_tether_enforce")),
         wan_admin=bool(setting("wan_admin")),
         admin_lan_access=setting("admin_lan_access") or "whitelist",
+        backup_peer=setting("backup_peer") or "",
         msg=msg, error=error)
 
 
@@ -1487,6 +1539,24 @@ def admin_tailscale_logout():
 
 
 _ACCESS_MODES = ("whitelist", "off", "tailscale", "any")
+
+
+@app.route("/admin/backup-peer", methods=["POST"])
+def admin_backup_peer():
+    if not admin_ok():
+        return redirect("/admin/login")
+    peer = (request.form.get("backup_peer") or "").strip()
+    # A machine name, not a command fragment: this ends up as an argv element
+    # for `tailscale file cp`, and there is no reason for it to contain
+    # anything but a hostname.
+    if peer and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", peer):
+        return _remote_page(error="That is not a valid Tailscale machine name.")
+    db.set_setting("backup_peer", peer)
+    db.log_audit("backup_peer", peer or "(cleared)")
+    if not peer:
+        return _remote_page(msg="Offsite backup target cleared.")
+    return _remote_page(msg="Offsite backups will be sent to '%s'. Add a "
+                            "backup_offsite job under Schedule." % peer)
 
 
 @app.route("/admin/access-mode", methods=["POST"])
@@ -1665,7 +1735,8 @@ def admin_schedules():
 # Job types the scheduler actually implements. Anything else is accepted into
 # the list and then logged as "unknown job type" once a day, where nobody sees
 # it — so reject it at the door instead.
-SCHEDULE_TYPES = ("reboot", "backup", "set_rate", "blocklist_refresh", "report")
+SCHEDULE_TYPES = ("reboot", "backup", "backup_offsite", "set_rate",
+                  "blocklist_refresh", "report")
 
 
 def _schedules_page(error=None):

@@ -28,6 +28,7 @@ from flask import (
 )
 
 import firewall
+import health
 import pppoe
 import shaper
 import tailscale
@@ -773,6 +774,9 @@ def _status_payload(mac):
         "mac": mac, "remaining": remaining, "paused": paused, "window": st,
         "projected_minutes": minutes_for(st["pesos"]) if st["pesos"] else 0,
         "wallet": db.wallet_balance(mac) if setting("wallet_enabled") else 0,
+        # A customer tapping INSERT COIN on a machine that cannot record the
+        # sale deserves to be told, not to watch a dead button.
+        "out_of_service": not storage_health["ok"],
     }
 
 
@@ -838,6 +842,12 @@ def api_insert():
         return jsonify(error="unidentified device"), 400
     if rate_limited("insert:" + (request.remote_addr or mac), 20, 60):
         return jsonify(error="Too many requests — slow down."), 429
+    # Never take a coin we cannot record. A machine whose card has gone
+    # read-only will happily keep crediting time and write down none of it --
+    # it takes cash and produces no record. Refusing is the honest failure.
+    if not storage_health["ok"]:
+        return jsonify(error="This machine is temporarily out of service. "
+                             "Please tell the owner."), 503
     if not slot.open_window(mac):
         return jsonify(error="Coin slot is in use by another customer — try again shortly."), 409
     return jsonify(ok=True)
@@ -1097,7 +1107,45 @@ def admin():
                   relay_pin=setting("relay_gpio_pin") or 0,
                   hold_s=int(setting("uncredited_hold_s") or 0)),
         speed=_speed_summary(), clock_warning=clock_warning,
+        storage=storage_health,
+        cash=_cash_summary(),
     )
+
+
+def _cash_summary():
+    """What the books say is in the coin box, and how the last count went."""
+    since = db.last_collection_at()
+    pesos, coins = db.takings_since(since)
+    last = (db.list_collections(1) or [None])[0]
+    return {
+        "since": since,
+        "expected": pesos,
+        "coins": coins,
+        "last": last,
+        # A variance the owner recorded last time. Kept visible because one
+        # short count is a miscount and three in a row is a problem.
+        "last_variance": (None if not last or last["counted_pesos"] is None
+                          else last["counted_pesos"] - last["expected_pesos"]),
+    }
+
+
+@app.route("/admin/collection", methods=["POST"])
+def admin_collection():
+    if not admin_ok():
+        return redirect("/admin/login")
+    c = _cash_summary()
+    counted = (request.form.get("counted") or "").strip()
+    try:
+        counted = int(counted) if counted else None
+    except ValueError:
+        counted = None
+    db.record_collection(c["expected"], c["coins"], counted,
+                         (request.form.get("note") or "").strip() or None)
+    detail = "expected P%d from %d coin(s)" % (c["expected"], c["coins"])
+    if counted is not None:
+        detail += ", counted P%d, variance P%+d" % (counted, counted - c["expected"])
+    db.log_audit("collection", detail)
+    return redirect("/admin")
 
 
 def _speed_summary():
@@ -2002,6 +2050,7 @@ def _reconcile_once():
         if minor_hex not in wanted:
             shaper.unlimit_minor(minor_hex)
     _refresh_walled()
+    _check_storage()
     _enforce_tethering()
     if setting("pppoe_enabled"):
         pppoe.enforce(db)   # expire overdue plans + keep chap-secrets in sync
@@ -2010,6 +2059,35 @@ def _reconcile_once():
     if now - _last_prune > 3600:
         _last_prune = now
         db.prune_audit()
+
+
+# Last storage verdict. Optimistic at boot so a machine is never held offline
+# by a check that has not run yet; the first reconcile pass corrects it within
+# seconds.
+storage_health = {"ok": True, "reason": None, "readonly": False,
+                  "writable": True, "kernel_errors": [], "checked_at": 0}
+
+
+def _check_storage():
+    """Can this machine still record a sale? See app/health.py."""
+    global storage_health
+    try:
+        was_ok = storage_health["ok"]
+        storage_health = health.check(os.path.dirname(db.path) or ".")
+        if was_ok and not storage_health["ok"]:
+            app.logger.error("STORAGE FAULT -- refusing to take money: %s",
+                             storage_health["reason"])
+            for ln in storage_health["kernel_errors"]:
+                app.logger.error("  kernel: %s", ln)
+            # Best effort: the whole point is that writes may be failing.
+            try:
+                db.log_audit("storage_fault", storage_health["reason"])
+            except Exception:
+                pass
+        elif not was_ok and storage_health["ok"]:
+            app.logger.warning("storage recovered -- taking money again")
+    except Exception as e:                                   # pragma: no cover
+        app.logger.warning("storage check failed: %s", e)
 
 
 def _enforce_tethering():

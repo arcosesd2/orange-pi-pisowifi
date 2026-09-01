@@ -2,6 +2,25 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+  {% if not storage.ok %}
+  <div class="notice bad">
+    <b>STORAGE FAULT &mdash; the machine has stopped taking coins.</b>
+    <p>{{ storage.reason }}</p>
+    <p class="hint">
+      Sales cannot be written, so accepting money would mean taking cash and
+      recording none of it. The portal shows customers an out-of-service notice
+      until this clears. Back up as soon as the card is writable again, and
+      treat the card as suspect.
+    </p>
+    {% if storage.kernel_errors %}
+    <details>
+      <summary>What the kernel reported</summary>
+      <pre style="white-space:pre-wrap;font-size:.75rem">{% for e in storage.kernel_errors %}{{ e }}
+{% endfor %}</pre>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if clock_warning %}
   <div class="notice bad">
     <b>Clock not synced.</b> {{ clock_warning }}
@@ -44,6 +63,51 @@
       <div class="n">{{ sales.all_time.count }} sales</div>
     </div>
   </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Coin box</h2>
+      <div class="spacer"></div>
+      <span class="muted">
+        {% if cash.since %}since you last emptied it{% else %}since this machine started{% endif %}
+      </span>
+    </div>
+
+    <p style="font-size:1.5rem;margin:.2rem 0">
+      <b>₱{{ cash.expected }}</b>
+      <span class="muted" style="font-size:.9rem">expected, from {{ cash.coins }} coin{{ '' if cash.coins == 1 else 's' }}</span>
+    </p>
+    <p class="hint">
+      This is what the machine believes it was paid. Count the box and compare:
+      the two numbers are separate measurements, and only comparing them catches
+      a jammed acceptor, a miscounting coin line, or a coin going missing
+      between the box and your hand.
+    </p>
+
+    {% if cash.last_variance is not none %}
+      {% if cash.last_variance == 0 %}
+      <div class="notice ok"><b>Last count matched exactly.</b></div>
+      {% else %}
+      <div class="notice {{ 'bad' if cash.last_variance < 0 else 'warn' }}">
+        <b>Last count was ₱{{ cash.last_variance }} {{ 'short' if cash.last_variance < 0 else 'over' }}.</b>
+        <span class="hint">One is a miscount. A pattern is a problem.</span>
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <form method="post" action="/admin/collection" class="row"
+          onsubmit="return confirm('Record emptying the coin box? This starts the count again from zero.')">
+      <label for="counted">Counted (optional)</label>
+      <input id="counted" name="counted" type="number" min="0" placeholder="₱ actually in the box">
+      <label for="cnote">Note</label>
+      <input id="cnote" name="note" type="text" placeholder="optional">
+      <button>I emptied the box</button>
+    </form>
+    <p class="hint">
+      Leave the count blank to just reset the tally. Filling it in is what makes
+      a shortfall visible.
+    </p>
+  </section>
 
   <section class="card">
     <div class="card-head">

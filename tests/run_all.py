@@ -30,6 +30,7 @@ TESTS = [
     "test_reachability.py",
     "test_tether.py",
     "test_admin_gate.py",
+    "test_cash_health.py",
     "test_functional.py",
     "test_security_audit.py",
 ]

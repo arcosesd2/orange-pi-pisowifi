@@ -51,6 +51,10 @@ COIN = dict(pending=5, unclaimed_total=15, unclaimed_events=2, relay_pin=11, hol
 
 PAGES = {
     "admin.html": dict(
+        storage={"ok": True, "reason": None, "readonly": False,
+                 "writable": True, "kernel_errors": [], "checked_at": 0},
+        cash={"since": 0, "expected": 125, "coins": 14, "last": None,
+              "last_variance": -5},
         sales=SALES, active=[{"mac": "aa:bb:cc:dd:ee:01", "paused": False, "remaining": 3720}],
         rate=20, tiers={"5": 120, "10": 260, "20": 560}, mock=False, coin=COIN,
         clock_warning=None,

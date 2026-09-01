@@ -76,6 +76,15 @@
         💰 <b>₱<span id="pendingPesos">0</span> waiting.</b>
         Tap INSERT COIN below to claim it.
       </div>
+      <!-- Storage has failed, so a sale cannot be written down. The machine
+           refuses coins rather than taking money it cannot record, and says so
+           here instead of leaving a dead button to be tapped. -->
+      <div id="oosNote" class="hide"
+           style="background:#7f1d1d33;border:1px solid #7f1d1d;border-radius:9px;
+                  padding:10px 12px;color:#fecaca;font-size:.85rem;margin-bottom:10px">
+        ⚠️ <b>Temporarily out of service.</b>
+        This machine cannot accept coins right now. Please tell the owner.
+      </div>
       <button class="big insert" id="insertBtn">🪙 INSERT COIN</button>
       <div class="muted">Tap first, then drop your coins</div>
     </div>
@@ -172,6 +181,12 @@ function render(j) {
   if ($('pendingNote')) {
     $('pendingNote').classList.toggle('hide', !(pending > 0) || open);
     if (pending > 0) $('pendingPesos').textContent = pending;
+  }
+  const oos = !!j.out_of_service;
+  if ($('oosNote')) $('oosNote').classList.toggle('hide', !oos);
+  if ($('insertBtn')) {
+    $('insertBtn').disabled = oos;
+    $('insertBtn').style.opacity = oos ? 0.45 : 1;
   }
   $('idleView').classList.toggle('hide', open);
   $('insertView').classList.toggle('hide', !open);

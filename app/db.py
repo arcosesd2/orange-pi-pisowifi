@@ -18,6 +18,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at REAL NOT NULL,
     paused_remaining REAL
 );
+-- Cash reconciliation. The machine knows exactly what it credited; until this
+-- table existed, nothing compared that to what was actually in the box, so a
+-- coin lost between the acceptor and the owner's hand was invisible. Each row
+-- is one emptying: what the books expected, what was really counted, and the
+-- difference.
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at REAL NOT NULL,
+    expected_pesos INTEGER NOT NULL,
+    counted_pesos INTEGER,
+    coins INTEGER NOT NULL,
+    note TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -464,6 +477,43 @@ class Db:
             return _hmac.compare_digest(dk.hex(), dk_hex)
         except Exception:
             return False
+
+    # -- cash reconciliation --
+
+    def last_collection_at(self):
+        """When the coin box was last emptied. 0 means never, in which case
+        'since last collection' is the machine's whole life -- which is the
+        honest answer, not an error."""
+        with self._conn() as c:
+            r = c.execute("SELECT MAX(at) FROM collections").fetchone()
+        return (r and r[0]) or 0.0
+
+    def takings_since(self, since):
+        """(pesos, coin count) credited since `since`.
+
+        Reads the sales ledger, which is what the machine believes it was paid.
+        The point of the feature is that this number and the coins in the box
+        are two different measurements, and only comparing them finds a fault.
+        """
+        with self._conn() as c:
+            r = c.execute(
+                "SELECT COALESCE(SUM(pesos),0), COUNT(*) FROM sales "
+                "WHERE created_at > ?", (since,)).fetchone()
+        return int(r[0]), int(r[1])
+
+    def record_collection(self, expected, coins, counted=None, note=None):
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO collections(at,expected_pesos,counted_pesos,coins,note) "
+                "VALUES(?,?,?,?,?)",
+                (time.time(), int(expected),
+                 None if counted is None else int(counted), int(coins), note))
+
+    def list_collections(self, limit=50):
+        with self._conn() as c:
+            return [dict(r) for r in c.execute(
+                "SELECT * FROM collections ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()]
 
     # -- audit log --
 

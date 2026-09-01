@@ -4,8 +4,18 @@ Description=PisoWiFi interface detection and network config rendering
 # what lets one SD card image work on any board: nftables.conf, the dnsmasq
 # config, hostapd.conf and the LAN address are all generated here from the
 # hardware actually present, instead of being baked in at install time.
-After=network-pre.target pisowifi-firstboot.service
-Wants=network-pre.target
+# Deliberately NOT ordered against network-pre.target. Debian's
+# nftables.service is Before=network-pre.target, and this unit is
+# Before=nftables.service, so asking for After=network-pre.target closes a
+# cycle: detect -> nftables -> network-pre -> detect. systemd breaks such a
+# cycle by DELETING one of the jobs, and which job it picks is not something to
+# rely on -- on this board it dropped network-pre and everything still worked,
+# but it could equally drop pisowifi-detect and leave nftables loading a stale
+# or absent config, i.e. a card that boots with no captive portal.
+#
+# Nothing here needs the network anyway: detection reads /sys/class/net, which
+# is populated as soon as the drivers bind, long before addresses are assigned.
+After=pisowifi-firstboot.service
 Before=nftables.service dnsmasq.service hostapd.service pisowifi.service pisowifi-tune.service
 
 [Service]

@@ -97,7 +97,10 @@ DEFAULTS = {
         "fast": {"up": "5mbit", "down": "10mbit"},
         "unlimited": None,
     },
-    "default_speed": "unlimited",
+    # Cap new sessions by default rather than handing each customer the whole
+    # uplink. Shipping "unlimited" meant every machine ran uncapped until
+    # somebody noticed, which is not a default anyone chose.
+    "default_speed": "default",
     "rate_speed": {},              # optional {pesos: profile_name} override map
 
     # walled garden (destinations unpaid clients may reach) + reconcile cadence
@@ -120,7 +123,7 @@ DEFAULTS = {
     # Limit devices detection has CONFIRMED are sharing. Opt-in on top of
     # detection, and scoped per device -- never a blanket rule. See
     # app/tether.py for why the blanket version broke customers.
-    "anti_tether_enforce": False,
+    "anti_tether_enforce": True,
     "flow_offload": False,         # kernel fast-path (scope vs QoS — see README)
     # free trial
     "trial_enabled": False,

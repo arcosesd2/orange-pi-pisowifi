@@ -89,7 +89,10 @@
       <div class="notice ok"><b>Last count matched exactly.</b></div>
       {% else %}
       <div class="notice {{ 'bad' if cash.last_variance < 0 else 'warn' }}">
-        <b>Last count was ₱{{ cash.last_variance }} {{ 'short' if cash.last_variance < 0 else 'over' }}.</b>
+        {# abs(): the word already carries the direction, so "-5 short" reads
+           as a double negative and makes the owner do arithmetic to find out
+           whether they are up or down. #}
+        <b>Last count was ₱{{ cash.last_variance | abs }} {{ 'short' if cash.last_variance < 0 else 'over' }}.</b>
         <span class="hint">One is a miscount. A pattern is a problem.</span>
       </div>
       {% endif %}

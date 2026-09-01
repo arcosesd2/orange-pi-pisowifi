@@ -8,23 +8,31 @@
  * standing next to it, not from a desk. Everything must stay usable at 360px.
  */
 
+/* Beach theme. Sea blues sampled from the resort photo, sunset accents taken
+ * from the logo, so the admin, the portal and the sign outside all agree.
+ *
+ * Deliberately darker and less saturated than the customer portal: the owner
+ * reads this for minutes at a time, often at night next to the machine, while
+ * a customer glances at the portal for seconds. Same family, calmer member.
+ */
 :root {
-  --bg:        #0f172a;
-  --bg-soft:   #131c31;
-  --card:      #1e293b;
-  --card-2:    #243449;
-  --line:      #334155;
-  --line-soft: #26344a;
-  --txt:       #e2e8f0;
-  --muted:     #94a3b8;
-  --accent:    #fbbf24;
-  --accent-dk: #b45309;
-  --ok:        #34d399;
-  --ok-bg:     #064e3b;
-  --bad:       #f87171;
-  --bad-bg:    #7f1d1d;
-  --warn:      #fbbf24;
-  --warn-bg:   #78350f;
+  --bg:        #062033;
+  --bg-soft:   #082a41;
+  --card:      #0c3550;
+  --card-2:    #10425f;
+  --line:      #1a5a7d;
+  --line-soft: #124a68;
+  --txt:       #eaf6ff;
+  --muted:     #9fc6dd;
+  --accent:    #ffc233;
+  --accent-dk: #b06a00;
+  --ok:        #22c79b;
+  --ok-bg:     #06403a;
+  --bad:       #ff8878;
+  --bad-bg:    #6d1f16;
+  --warn:      #ffb020;
+  --warn-bg:   #6b3d05;
+  --sky:       #53c3fe;
   --radius:    14px;
   --radius-sm: 9px;
 }
@@ -47,9 +55,17 @@ body {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(15, 23, 42, .92);
+  /* The resort photo behind the header, pushed well back so it is atmosphere
+     and never competes with the nav. The gradient alone still reads as sea if
+     the image is missing, so nothing looks broken without it. */
+  background:
+    linear-gradient(180deg, rgba(6,32,51,.80) 0%, rgba(6,32,51,.94) 100%),
+    url('/static/beach-hero-sm.jpg') center 38% / cover no-repeat,
+    linear-gradient(180deg, #0b4a6f, #062033);
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 2px 18px rgba(2, 18, 30, .45);
 }
 
 .topbar-inner {

@@ -5,28 +5,103 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ name }}</title>
 <style>
-  :root { --bg:#0f172a; --card:#1e293b; --accent:#fbbf24; --ok:#34d399; --txt:#e2e8f0; }
+  /* Beach theme. Blues sampled from the resort photo, sunset accents from the
+     logo, so the portal, the sign outside and the logo all agree.
+
+     Weight is the design constraint, not decoration: this page is served off
+     an SD card over the link the customer is also trying to browse on. The
+     background is one 22 KB image on phones, everything else is CSS. */
+  :root {
+    --sky-1:#1aacff; --sky-2:#53c3fe; --sky-3:#9ad8ff;
+    --sea-1:#0b4a6f; --sea-2:#0e5c86; --sea-3:#397ead;
+    --sand:#f6e7c9;
+    --sun-1:#ffc233; --sun-2:#ff8a3d; --sun-3:#f4511e;
+    --accent:var(--sun-1);
+    --ok:#22c79b;
+    --txt:#f2fbff; --muted:#b9dcef;
+    --glass:rgba(6,42,64,.62); --edge:rgba(255,255,255,.16);
+  }
   * { box-sizing:border-box; margin:0; }
-  body { font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt);
-         min-height:100vh; display:flex; flex-direction:column; align-items:center;
-         padding:24px 16px; gap:16px; }
-  h1 { font-size:1.4rem; letter-spacing:.05em; color:var(--accent); text-align:center; }
-  .card { background:var(--card); border-radius:16px; padding:20px; width:100%;
-          max-width:420px; text-align:center; }
-  .timer { font-size:2.6rem; font-variant-numeric:tabular-nums; font-weight:700; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color:var(--txt); min-height:100dvh;
+    display:flex; flex-direction:column; align-items:center;
+    /* Photo on top, deep-sea gradient beneath. The gradient alone still reads
+       as ocean if the image is slow or blocked, so nothing looks broken. */
+    background:
+      linear-gradient(180deg, rgba(4,30,48,.30) 0%, rgba(4,30,48,.72) 46%, var(--sea-1) 78%),
+      url('/static/beach-hero-sm.jpg') top center / 100% auto no-repeat,
+      linear-gradient(180deg, var(--sky-1) 0%, var(--sea-2) 55%, var(--sea-1) 100%);
+    background-attachment:scroll;
+    padding:20px 14px calc(20px + env(safe-area-inset-bottom)); gap:14px;
+  }
+  @media (min-width:560px) {
+    body { background-image:
+      linear-gradient(180deg, rgba(4,30,48,.30) 0%, rgba(4,30,48,.72) 46%, var(--sea-1) 78%),
+      url('/static/beach-hero.jpg'),
+      linear-gradient(180deg, var(--sky-1) 0%, var(--sea-2) 55%, var(--sea-1) 100%);
+      background-size:auto, 100% auto, auto; background-repeat:no-repeat;
+      background-position:top center; }
+  }
+  h1 { font-size:1.35rem; line-height:1.25; letter-spacing:.02em; color:#fff;
+       text-align:center; text-shadow:0 2px 10px rgba(0,40,70,.55);
+       display:flex; align-items:center; justify-content:center; gap:8px;
+       flex-wrap:wrap; max-width:min(100%,460px); }
+  .card {
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    border:1px solid var(--edge); border-radius:20px;
+    box-shadow:0 10px 30px rgba(2,22,38,.34);
+    padding:20px 18px; width:100%; max-width:420px; text-align:center;
+  }
+  .timer { font-size:clamp(2.2rem,11vw,3rem); font-variant-numeric:tabular-nums;
+           font-weight:800; letter-spacing:.02em; line-height:1.1;
+           text-shadow:0 2px 12px rgba(0,0,0,.28); }
   .timer.paused { color:var(--accent); }
-  .big { display:block; width:100%; padding:18px; margin-top:14px; border:0;
-         border-radius:12px; font-size:1.15rem; font-weight:700; cursor:pointer; }
-  .insert { background:var(--accent); color:#111; }
-  .start  { background:var(--ok); color:#111; }
-  .ghost  { background:transparent; color:var(--txt); border:1px solid #475569; }
-  .pesos { font-size:2rem; color:var(--ok); font-weight:700; }
-  .muted { color:#94a3b8; font-size:.9rem; margin-top:8px; }
-  table { width:100%; border-collapse:collapse; font-size:.9rem; }
-  td { padding:4px 8px; border-bottom:1px solid #334155; }
-  #err { color:#f87171; min-height:1.2em; font-size:.9rem; }
-  .hide { display:none; }
-  .banner { width:100%; max-width:420px; max-height:130px; object-fit:cover; border-radius:12px; }
+  .big { display:block; width:100%; min-height:56px; padding:16px 18px;
+         margin-top:12px; border:0; border-radius:14px;
+         font-size:1.1rem; font-weight:800; letter-spacing:.02em;
+         cursor:pointer; -webkit-tap-highlight-color:transparent;
+         transition:transform .08s ease, filter .15s ease; }
+  .big:active { transform:translateY(1px) scale(.995); }
+  .big:disabled { filter:grayscale(.5); cursor:not-allowed; }
+  /* Sunset gradient, straight off the logo, and the only warm thing on a cool
+     page -- so the one button that earns money is impossible to miss. */
+  .insert { background:linear-gradient(135deg,var(--sun-1),var(--sun-3)); color:#3a1c00;
+            box-shadow:0 6px 18px rgba(244,81,30,.32); }
+  .start  { background:linear-gradient(135deg,#38e0b0,var(--ok)); color:#04322a;
+            box-shadow:0 6px 18px rgba(34,199,155,.28); }
+  .ghost  { background:rgba(255,255,255,.07); color:var(--txt);
+            border:1px solid var(--edge); font-weight:700; }
+  .pesos { font-size:clamp(1.8rem,9vw,2.2rem); color:var(--sun-1); font-weight:800; }
+  .muted { color:var(--muted); font-size:.88rem; margin-top:8px; line-height:1.45; }
+  table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.10); text-align:left; }
+  td:last-child { text-align:right; font-weight:700; color:var(--sky-3); }
+  tr:last-child td { border-bottom:0; }
+  #err { color:#ffc9c0; min-height:1.2em; font-size:.9rem; }
+  .hide { display:none !important; }
+  .banner { width:100%; max-width:420px; max-height:130px; object-fit:cover;
+            border-radius:16px; border:1px solid var(--edge); }
+  h2 { font-size:1rem; letter-spacing:.06em; text-transform:uppercase;
+       color:var(--sky-3); margin-bottom:6px; }
+  /* 16px minimum, or iOS Safari zooms the whole page the moment the field is
+     focused and the customer is left scrolled sideways mid-code. */
+  .code { width:100%; margin-top:10px; padding:14px 12px; min-height:52px;
+          font-size:16px; letter-spacing:.16em; text-align:center;
+          text-transform:uppercase; font-weight:700;
+          color:var(--txt); background:rgba(3,26,42,.55);
+          border:1px solid var(--edge); border-radius:14px;
+          -webkit-appearance:none; appearance:none; }
+  .code::placeholder { color:rgba(185,220,239,.55); letter-spacing:.1em;
+                       font-weight:600; }
+  .code:focus { outline:none; border-color:var(--sky-2);
+                box-shadow:0 0 0 3px rgba(83,195,254,.22);
+                background:rgba(3,26,42,.72); }
+  /* Keyboard focus must stay visible for anyone not using touch. */
+  .big:focus-visible, .code:focus-visible {
+    outline:3px solid var(--sky-3); outline-offset:2px; }
 </style>
 {% if brand.color %}<style>:root { --accent:{{ brand.color }}; }</style>{% endif %}
 </head>
@@ -114,10 +189,9 @@
   <!-- voucher -->
   <div class="card">
     <div class="muted">HAVE A CODE?</div>
-    <input id="code" placeholder="ENTER VOUCHER CODE" autocomplete="off"
-           style="width:100%;padding:12px;margin-top:8px;text-transform:uppercase;
-                  border-radius:10px;border:1px solid #475569;background:#0f172a;
-                  color:var(--txt);text-align:center;font-size:1.1rem;letter-spacing:.12em">
+    <input id="code" class="code" placeholder="ENTER VOUCHER CODE"
+           autocomplete="off" autocapitalize="characters" spellcheck="false"
+           inputmode="text">
     <button class="big start" id="redeemBtn">🎟 REDEEM CODE</button>
   </div>
   {% endif %}

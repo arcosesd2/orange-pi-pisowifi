@@ -95,6 +95,7 @@ PAGES = {
                 "vpn_like": ["aa:bb:cc:dd:ee:02"]},
         anti_tether=True, enforce=True, wan_admin=True,
         admin_lan_access="tailscale", msg="Saved.", error=None),
+    "rebooting.html": dict(what="board", back_after="about a minute"),
     "admin_login.html": dict(error=None),
     "admin_setup.html": dict(error=None, mac="aa:bb:cc:dd:ee:01", on_lan=True),
 }

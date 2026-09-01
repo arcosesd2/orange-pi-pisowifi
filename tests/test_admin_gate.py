@@ -86,6 +86,17 @@ with main.app.test_request_context("/admin", environ_base={
 check("customer may reach /admin                  in tailscale-only mode",
       "REACHABLE" if not blocked else "BLOCKED", "BLOCKED")
 
+print("\n=== maintenance routes are admin-only and customer-blocked ===")
+main.db.set_setting("admin_lan_access", "tailscale")
+main.tailscale.status = lambda: {"installed": True, "running": True,
+                                 "ip4": "100.101.102.103"}
+for path in ("/admin/reboot", "/admin/restart-service"):
+    with main.app.test_request_context(path, method="POST", environ_base={
+            "REMOTE_ADDR": CUSTOMER}):
+        blocked = main._admin_guard() is not None
+    check("customer POST %-22s is refused" % path,
+          "BLOCKED" if blocked else "REACHABLE", "BLOCKED")
+
 print()
 if fails:
     print("%d ADMIN GATE FAILURE(S):" % len(fails))

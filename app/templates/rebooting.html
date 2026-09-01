@@ -1,0 +1,53 @@
+{% extends "_admin_base.html" %}
+{% block title %}Restarting{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>{% if what == 'board' %}Rebooting the board{% else %}Restarting the service{% endif %}</h2>
+
+  <p>
+    {% if what == 'board' %}
+      The Orange Pi is going down now. The hotspot is offline until it comes
+      back &mdash; usually {{ back_after }}.
+    {% else %}
+      The portal service is restarting. It should be back in {{ back_after }}.
+    {% endif %}
+  </p>
+
+  <p class="hint">
+    <b>Nobody loses paid time.</b> Sessions are stored in the database with an
+    absolute expiry and re-applied on startup, along with each customer's speed
+    limit. A customer with 40 minutes left still has 40 minutes when it returns;
+    they simply cannot browse while it is down. Coins held but not yet claimed
+    survive too.
+  </p>
+
+  <p id="status" class="hint">Checking&hellip;</p>
+
+  <p><a class="btn" href="/admin">Back to the dashboard</a></p>
+</section>
+{% endblock %}
+
+{% block script %}
+<script>
+// Poll until the machine answers again, so the operator gets told rather than
+// having to guess when it is safe to reload. Deliberately hits the portal root
+// and not an admin page: admin may be restricted to Tailscale, and a 403 here
+// would look like a failure when the machine is in fact perfectly healthy.
+const status = document.getElementById('status');
+let tries = 0;
+function poll() {
+  tries++;
+  fetch('/', { cache: 'no-store' })
+    .then(() => {
+      status.textContent = 'Back up. You can reload the admin page now.';
+      status.classList.add('ok');
+    })
+    .catch(() => {
+      status.textContent = 'Still down… (' + tries + ')';
+      setTimeout(poll, 3000);
+    });
+}
+setTimeout(poll, 4000);
+</script>
+{% endblock %}

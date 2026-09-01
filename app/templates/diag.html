@@ -238,6 +238,44 @@
       <div class="actions"><button>Save &amp; apply live</button></div>
     </form>
   </section>
+
+  <section class="card">
+    <h2>Maintenance</h2>
+    <p class="hint">
+      Paid time is not lost by either of these. Sessions live in the database
+      and are re-applied on startup, so a customer with 40 minutes left still
+      has 40 minutes afterwards &mdash; they just lose connectivity while the
+      machine is down.
+    </p>
+
+    <div class="grid2">
+      <div>
+        <h3>Restart the software</h3>
+        <p class="hint">
+          Restarts the portal service only. Takes a few seconds and the board
+          stays up. Try this first &mdash; it clears almost anything a reboot
+          would, without the wait.
+        </p>
+        <form method="post" action="/admin/restart-service"
+              onsubmit="return confirm('Restart the PisoWiFi service? Customers lose connectivity for a few seconds. Paid time is kept.')">
+          <button class="ghost">Restart service</button>
+        </form>
+      </div>
+
+      <div>
+        <h3>Reboot the board</h3>
+        <p class="hint">
+          Full restart of the Orange Pi. Takes about a minute, and you will not
+          be able to reach this page until it is back. Coin acceptor, firewall
+          and shaping are all rebuilt on boot.
+        </p>
+        <form method="post" action="/admin/reboot"
+              onsubmit="return confirm('Reboot the whole board?\n\nThe hotspot is DOWN for about a minute and nobody can buy time during that. Paid time is kept.\n\nContinue?')">
+          <button class="danger">Reboot board</button>
+        </form>
+      </div>
+    </div>
+  </section>
 {% endblock %}
 
 {% block script %}

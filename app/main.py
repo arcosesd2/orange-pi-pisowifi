@@ -1489,6 +1489,65 @@ def admin_tether_release():
     return _remote_page(error="Could not release %s." % (mac or "that device"))
 
 
+# ---------- admin: maintenance ----------
+
+def _diag_page(error=None):
+    hw = hwcfg()
+    return render_template(
+        "diag.html", name=setting("hotspot_name"), hw=hw,
+        denominations=hw["denominations"], mock=slot.mock,
+        eint_pins=EINT_PINS, error=error,
+    )
+
+
+def _deferred(cmd, delay=2):
+    """Run a command after this request has finished replying.
+
+    Rebooting inline would kill waitress mid-response, so the operator would
+    see a connection error and have no idea whether the reboot was accepted.
+    Detaching it with a short delay means the page renders first and the
+    machine goes down a moment later.
+    """
+    if MOCK:
+        app.logger.warning("mock mode: would have run %s", cmd)
+        return True, "Mock mode -- not actually run."
+    try:
+        subprocess.Popen(
+            ["systemd-run", "--on-active=%d" % delay, "--collect", "--quiet"] + cmd,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, None
+    except (OSError, subprocess.SubprocessError) as e:      # pragma: no cover
+        return False, str(e)
+
+
+@app.route("/admin/reboot", methods=["POST"])
+def admin_reboot():
+    if not admin_ok():
+        return redirect("/admin/login")
+    db.log_audit("reboot", "requested from admin")
+    ok, err = _deferred(["systemctl", "reboot"], delay=3)
+    if not ok:
+        return _diag_page(error="Could not reboot: %s" % err)
+    return render_template(
+        "rebooting.html", name=setting("hotspot_name"),
+        what="board", back_after="about a minute")
+
+
+@app.route("/admin/restart-service", methods=["POST"])
+def admin_restart_service():
+    if not admin_ok():
+        return redirect("/admin/login")
+    db.log_audit("restart_service", "requested from admin")
+    # try-restart, not restart: if the unit is somehow not loaded, failing
+    # loudly here is better than systemd starting a second copy.
+    ok, err = _deferred(["systemctl", "try-restart", "pisowifi.service"], delay=2)
+    if not ok:
+        return _diag_page(error="Could not restart: %s" % err)
+    return render_template(
+        "rebooting.html", name=setting("hotspot_name"),
+        what="service", back_after="a few seconds")
+
+
 # ---------- admin: audit log ----------
 
 @app.route("/admin/audit")

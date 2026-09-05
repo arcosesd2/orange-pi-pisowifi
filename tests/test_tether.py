@@ -106,6 +106,41 @@ check("and still detected four hops further away (58/57)",
 fake_seen((HW, 128, 40), (HW, 127, 900))
 check("and on a Windows baseline of 128", tether.tethering_macs(), {HW})
 
+print("\n=== Link-local traffic is not forwarding (the 13-device false positive) ===")
+
+# Measured on the live machine with 13 devices connected. mDNS/SSDP go out at
+# TTL 255, so an ordinary phone shows a handful of packets at 254 alongside all
+# its real traffic at 63. Taking the plain max as the baseline made 254 the
+# reference and counted every normal packet as "arriving below it": two of the
+# 13 were flagged and one was actually blocked. None was tethering.
+REAL = "52:4c:fd:42:1f:e5"
+fake_seen((REAL, 254, 369), (REAL, 63, 419532))
+check("phone with mDNS at 254 is NOT tethering", tether.tethering_macs(), set())
+check("baseline comes from the dominant population, not the max",
+      tether.observe()[REAL]["baseline"], 63)
+check("its normal traffic is not counted as forwarded",
+      tether.observe()[REAL]["forwarded"], 0)
+
+fake_seen(("32:1e:2e:5e:b6:d7", 254, 5), ("32:1e:2e:5e:b6:d7", 63, 277691))
+check("and again with only five discovery packets",
+      tether.tethering_macs(), set())
+
+# But a device that BOTH does discovery and genuinely shares must still be
+# caught: the dominant population is 63/62, and 62 is below its baseline.
+BOTH = "aa:bb:cc:dd:ee:09"
+fake_seen((BOTH, 255, 6), (BOTH, 63, 100), (BOTH, 62, 5000))
+check("discovery traffic does not mask genuine sharing",
+      tether.tethering_macs(), {BOTH})
+check("...and the baseline is still the real one", tether.observe()[BOTH]["baseline"], 63)
+check("...counting only the traffic below it", tether.observe()[BOTH]["forwarded"], 5000)
+
+# The rest of that live sample: every one of these is an ordinary device.
+for mac, ttl, n in [("20:64:cb:8c:7b:29", 63, 12382), ("50:28:4a:0a:20:62", 127, 4466),
+                    ("aa:ce:63:c8:8c:0b", 63, 691469), ("9a:59:25:d8:d4:4c", 63, 115)]:
+    fake_seen((mac, ttl, n))
+    check("single-population device %s is left alone" % mac,
+          tether.tethering_macs(), set())
+
 print("\n=== Parser handles what nft actually prints ===")
 
 

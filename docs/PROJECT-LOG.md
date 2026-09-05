@@ -828,6 +828,36 @@ ones blamed on idle phones, was `command not found` hidden behind
 `2>/dev/null`. Never silence stderr on a diagnostic you have not confirmed
 exists; and on this board, nft counters are the packet tool.
 
+### The same day: v3 false-positived a shop full of customers
+
+Asked whether the board was reachable; the health check showed the LAN dongle
+had re-enumerated with a different MAC (`enx00e04c68006f` ->
+`enx00e04c6800dd`). Everything self-healed correctly -- detect re-provisioned,
+32 nft rules and the whole tc tree followed the new name, NAT and portal
+redirect intact. Cheap Realtek dongles do this; the bus-type detection earned
+its keep.
+
+But with 13 real devices connected instead of two bench phones, v3 was
+flagging two of them and had **blocked** one:
+
+    52:4c:fd:42:1f:e5   {254: 369, 63: 419532}   fwd 419532   BLOCKED
+    32:1e:2e:5e:b6:d7   {254: 5,   63: 277691}   fwd 277691
+
+mDNS and SSDP leave at TTL 255. `baseline = max(ttls)` therefore picked 254
+off a handful of discovery packets and counted every one of that customer's
+419,532 normal packets as "arriving below the baseline". None of the 13 was
+tethering.
+
+Fixed by grouping TTLs within 8 hops of each other and judging the device on
+whichever group carries its traffic. Flushing the block set was not enough --
+the reconcile loop re-pushed the device within seconds, which is the correct
+behaviour and the reason a bad heuristic has to be fixed in code, not in nft.
+Verified live: 13 devices, all baseline 63 or 127, forwarded 0, nothing
+blocked. The genuine sharing case still trips the test suite.
+
+**A heuristic that passes a two-device bench test has not been tested.** The
+bug needed a shop full of phones doing service discovery to appear.
+
 ### Open items
 
 - [ ] Owner to confirm one tap on the portal makes the next coin audible

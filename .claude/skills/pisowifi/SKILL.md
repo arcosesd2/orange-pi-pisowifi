@@ -274,10 +274,27 @@ nothing for anybody, `ttl_norm` stayed empty forever, and the feature said
     WORKS   set ttl_seen { typeof ether saddr . ip ttl; flags dynamic, timeout; counter; }
             iifname $LAN_IF update @ttl_seen { ether saddr . ip ttl counter }
 
-Then in userspace: baseline = that MAC's **highest** TTL; forwarded = packets
-below it; tethering = forwarded >= 25. The volume floor is what separates a
-VPN leaking single-digit packets from a shared device sending thousands. Both
-`typeof ether saddr . ip ttl` and per-element `counter` work on nft 1.1.3.
+Then in userspace, and **not** with a plain `max()`:
+
+    FAILS   baseline = max(ttls)
+    WORKS   group TTLs within 8 of each other; take the group with the most
+            packets; baseline = max of THAT group
+
+**Link-local traffic breaks the naive version.** mDNS and SSDP leave at TTL
+255, so an ordinary phone reports `{254: 369, 63: 419532}`. `max()` picks 254,
+counts all 419532 normal packets as "arriving below the baseline", and reports
+the customer as sharing. Seen on a live shop with 13 devices connected: two
+flagged, one actually blocked, none of the 13 tethering. 191 hops apart is not
+a hotspot -- populations that far apart are different protocol families.
+
+Then: forwarded = packets below the baseline **within that group**; tethering =
+forwarded >= 25. The volume floor separates a VPN leaking single-digit packets
+from a shared device sending thousands. Both `typeof ether saddr . ip ttl` and
+per-element `counter` work on nft 1.1.3.
+
+**Test any heuristic against a full live sample, not one device.** The
+two-phone bench test passed perfectly; the bug only appeared with a shop full
+of real devices doing service discovery.
 Enforce per confirmed device, never with a blanket rule -- and see 3h for how
 to key the enforcement rule, because the obvious way is dead.
 

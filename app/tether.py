@@ -67,6 +67,24 @@ SEEN, BLOCK, BLOCK_IP = "ttl_seen", "tether_block", "tether_block_ip"
 # counted in single digits.
 MIN_FWD_PACKETS = 25
 
+# How far below its own baseline a device's forwarded traffic can plausibly
+# arrive. A hotspot costs one hop; a phone sharing to a laptop that is itself
+# sharing costs two. Eight is generous.
+#
+# This bound is what stops a device's LINK-LOCAL traffic being mistaken for
+# forwarding. mDNS, SSDP and friends go out at TTL 255, so a perfectly ordinary
+# phone reports something like {254: 369, 63: 419532}: a handful of discovery
+# packets and everything else at the normal 63. Taking the plain maximum as the
+# baseline made 254 the reference, counted all 419532 normal packets as
+# "arriving below it", and flagged the customer for sharing. Observed on the
+# live machine with 13 devices connected -- two were flagged and one was
+# actually blocked, and none of the 13 was tethering at all.
+#
+# 191 hops apart is not a hotspot. Populations that far apart are different
+# protocol families from one device, so they are grouped separately and the
+# device is judged on whichever group carries its real traffic.
+MAX_HOPS = 8
+
 _MAC = re.compile(r"\b([0-9a-f]{2}(?::[0-9a-f]{2}){5})\b", re.I)
 _IP = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}")
 # "aa:bb:cc:dd:ee:ff . 62 [expires 9m51s] counter packets 1724 bytes 356821"
@@ -120,19 +138,46 @@ def pairs():
     return out
 
 
+def _dominant(ttls):
+    """(baseline, forwarded packets) for a device's main traffic population.
+
+    TTL values within MAX_HOPS of each other are one population; anything
+    further away is a different protocol family (link-local discovery at 255,
+    typically) and is judged separately. The group carrying the most packets is
+    the device's real traffic, its highest TTL is the baseline, and whatever
+    arrives below that baseline *within the same group* was forwarded.
+
+    Taking a plain max() here is what flagged two ordinary phones as sharing:
+    five mDNS packets at 254 outranked a quarter of a million at 63.
+    """
+    if not ttls:
+        return None, 0
+    groups, cur = [], []
+    for t in sorted(ttls, reverse=True):
+        if cur and cur[-1] - t > MAX_HOPS:
+            groups.append(cur)
+            cur = []
+        cur.append(t)
+    if cur:
+        groups.append(cur)
+    best = max(groups, key=lambda g: sum(ttls[t] for t in g))
+    baseline = max(best)
+    return baseline, sum(ttls[t] for t in best if t < baseline)
+
+
 def observe():
     """Current picture, per MAC.
 
     Returns {mac: {"baseline": int, "ttls": {ttl: packets}, "forwarded": int,
-                   "tethering": bool}} where `baseline` is that device's own
-    highest observed TTL and `forwarded` is the packet count arriving below it.
+                   "tethering": bool}} where `baseline` is the top of that
+    device's dominant TTL population and `forwarded` is the packet count
+    arriving below it inside that population.
     """
     out = {}
     for mac, ttls in pairs().items():
         if not ttls:
             continue
-        baseline = max(ttls)
-        forwarded = sum(n for t, n in ttls.items() if t < baseline)
+        baseline, forwarded = _dominant(ttls)
         out[mac] = {
             "baseline": baseline,
             "ttls": dict(sorted(ttls.items(), reverse=True)),
